@@ -175,3 +175,7 @@ cython_debug/
 
 # JavaScript
 /node_modules
+
+# ROS2
+install/
+log/
