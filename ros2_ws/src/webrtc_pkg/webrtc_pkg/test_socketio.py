@@ -14,6 +14,20 @@ def disconnect():
 def connect_error(data):
     print("Connection failed:", data)
 
+
+@sio.event
+def welcome():
+    print("Someone joined!")
+
+@sio.event
+def bye():
+    print("Someone left ㅠㅠ")
+
+@sio.event
+def new_message(msg):
+    print("Someone: ", msg)
+
+
 def showRoom():
     print("Check-in Room")
 
@@ -21,9 +35,10 @@ def main():
     try:
         sio.connect('http://localhost:3000')
 
-        roomName = "exampleRoom"
-        sio.emit("enter_room", {"roomName": roomName}, callback=showRoom)
+        roomName = "asdf"
+        sio.emit("enter_room", roomName, callback=showRoom)
 
+        print("wait..")
         sio.wait()
 
     except Exception as e:
