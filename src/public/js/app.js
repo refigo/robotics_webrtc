@@ -20,11 +20,11 @@ async function getCameras() {
 
 async function getMedia() {
     try {
-        myStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: true,
-        });
-        myFace.srcObject = myStream;
+        // myStream = await navigator.mediaDevices.getUserMedia({
+        //     audio: true,
+        //     video: true,
+        // });
+        // myFace.srcObject = myStream;
         await getCameras();
     } catch (e) {
         console.log(e);
