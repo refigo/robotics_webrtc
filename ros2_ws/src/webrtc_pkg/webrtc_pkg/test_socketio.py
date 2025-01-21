@@ -16,16 +16,16 @@ def connect_error(data):
 
 
 @sio.event
-def welcome():
-    print("Someone joined!")
+def welcome(user):
+    print(f"{user} arrived!")
 
 @sio.event
-def bye():
-    print("Someone left ㅠㅠ")
+def bye(left):
+    print(f"{left} left ㅠㅠ")
 
 @sio.event
 def new_message(msg):
-    print("Someone: ", msg)
+    print(msg)
 
 
 def showRoom():
