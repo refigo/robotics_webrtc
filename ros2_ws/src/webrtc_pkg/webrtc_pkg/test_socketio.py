@@ -16,12 +16,12 @@ def connect_error(data):
 
 
 @sio.event
-def welcome(user):
-    print(f"{user} arrived!")
+def welcome(user, newCount):
+    print(f"{user} arrived! - ({newCount})")
 
 @sio.event
-def bye(left):
-    print(f"{left} left ㅠㅠ")
+def bye(left, newCount):
+    print(f"{left} left ㅠㅠ - ({newCount})")
 
 @sio.event
 def new_message(msg):
