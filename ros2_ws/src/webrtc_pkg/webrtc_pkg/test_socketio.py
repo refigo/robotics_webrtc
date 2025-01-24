@@ -33,7 +33,8 @@ def showRoom():
 
 def main():
     try:
-        sio.connect('http://localhost:3000')
+        # sio.connect('http://localhost:3000')
+        sio.connect('http://192.168.20.67:3000')
 
         roomName = "asdf"
         sio.emit("enter_room", roomName, callback=showRoom)
