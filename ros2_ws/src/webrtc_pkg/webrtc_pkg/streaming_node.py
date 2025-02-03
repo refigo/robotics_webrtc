@@ -29,7 +29,7 @@ class Intermediate(Node):
     """
     ROS Node for handling image data and adjusting the quality based on network conditions.
     """
-    def __init__(self, mode="auto"):
+    def __init__(self, mode="manual"):
         super().__init__('intermediate_node')
         self.bridge = cv_bridge.CvBridge()
         self.image_subscriber = self.create_subscription(Image, '/camera/camera/color/image_raw', self.image_callback, 10)
@@ -40,7 +40,7 @@ class Intermediate(Node):
         self.placeholder_image = cv2.imread("placeholder.jpg")
         self.new_image = None
         self.rtt = None
-        self.manual_resolution = (1881, 1051)
+        self.manual_resolution = (1920, 1080)
         self.mode = mode
         logger.info("Intermediate Node initialized in %s mode", self.mode)
 
@@ -189,19 +189,19 @@ async def offer(request):
     image_track = ImageVideoTrack(intermediate_node)
     pc.addTrack(image_track)
 
-    # @pc.on("datachannel")
-    # def on_datachannel(channel):
-    #     @channel.on("message")
-    #     def on_message(message):
-    #         """
-    #         Processes incoming messages on the data channel.
-    #         """
-    #         if isinstance(message, str) and message.startswith("ping"):
-    #             log_info("Received ping message", message)
-    #             channel.send("pong" + message[4:])
-    #         if isinstance(message, str) and message.startswith("latency"):
-    #             intermediate_node.rtt = int(message[7:])
-    #             log_info("Updated RTT to %d", intermediate_node.rtt)
+    @pc.on("datachannel")
+    def on_datachannel(channel):
+        @channel.on("message")
+        def on_message(message):
+            """
+            Processes incoming messages on the data channel.
+            """
+            if isinstance(message, str) and message.startswith("ping"):
+                log_info("Received ping message", message)
+                channel.send("pong" + message[4:])
+            # if isinstance(message, str) and message.startswith("latency"):
+            #     intermediate_node.rtt = int(message[7:])
+            #     log_info("Updated RTT to %d", intermediate_node.rtt)
 
     @pc.on("iceconnectionstatechange")
     async def on_iceconnectionstatechange():

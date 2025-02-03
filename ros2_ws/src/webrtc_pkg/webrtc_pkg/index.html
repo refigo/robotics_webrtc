@@ -5,6 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebRTC Demo</title>
+    <link rel="stylesheet", href="https://unpkg.com/mvp.css">
     <style>
         button {
             padding: 8px 16px;
@@ -16,7 +17,7 @@
         }
 
         video {
-            width: 100%;
+            width: 75%;
         }
 
         .option {
@@ -26,21 +27,15 @@
         #media {
             max-width: 1280px;
         }
+
+
+
+
     </style>
 </head>
 
 <body>
 
-    <!-- <h2>Options</h2>
-    <div class="option">
-        <input id="use-datachannel" checked="checked" type="checkbox" />
-        <label for="use-datachannel">Use datachannel</label>
-        <select id="datachannel-parameters">
-            <option value='{"ordered": true}'>Ordered, reliable</option>
-            <option value='{"ordered": false, "maxRetransmits": 0}'>Unordered, no retransmissions</option>
-            <option value='{"ordered": false, "maxPacketLifetime": 500}'>Unordered, 500ms lifetime</option>
-        </select>
-    </div> -->
 
     <!-- <div class="option">
         <input id="use-audio" checked="checked" type="checkbox" />
@@ -102,10 +97,22 @@
         <video id="video" autoplay="true" playsinline="true"></video>
     </div>
 
-    <!-- <h2>Data Channel</h2>
+    <h2>Data Channel</h2>
+    <div id="use-datachannel"/>
+    <!-- <h3>Options</h3> -->
+    <!-- <div class="option"> -->
+        <!-- <input id="use-datachannel" checked="checked" type="checkbox" /> -->
+        <!-- <label for="use-datachannel">Use datachannel</label> -->
+        
+        <!-- <select id="datachannel-parameters">
+            <option value='{"ordered": true}'>Ordered, reliable</option>
+            <option value='{"ordered": false, "maxRetransmits": 0}'>Unordered, no retransmissions</option>
+            <option value='{"ordered": false, "maxPacketLifetime": 500}'>Unordered, 500ms lifetime</option>
+        </select> -->
+    <!-- </div> -->
     <pre id="data-channel" style="height: 200px;"></pre>
 
-    <h2>SDP</h2>
+    <!-- <h2>SDP</h2>
     <h3>Offer</h3>
     <pre id="offer-sdp"></pre>
     <h3>Answer</h3>

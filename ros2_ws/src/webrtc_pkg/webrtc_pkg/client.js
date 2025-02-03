@@ -54,7 +54,8 @@ function negotiate()
 
 {
     // var videoResolutionSelect = document.getElementById('video-resolution');
-    var selectedResolution = "1280x720" // videoResolutionSelect.value;
+    var selectedResolution = "1920x1080" // videoResolutionSelect.value;
+    // var selectedResolution = "1280x720"
     console.log('Selected video resolution:', selectedResolution); // Log for debugging
 
     // Create offer and set local description
@@ -130,7 +131,7 @@ function start() {
         console.log('DataChannel opened'); // Log for debugging
         dcInterval = setInterval(function() {
             var message = 'ping ' + current_stamp();
-            // dataChannelLog.textContent += '> ' + message + '\n';
+            dataChannelLog.textContent += '> ' + message + '\n';
             dc.send(message);
             console.log('Sent message:', message); // Log for debugging
         }, 1000);
@@ -142,6 +143,8 @@ function start() {
         if (evt.data.substring(0, 4) === 'pong') {
             var elapsed_ms = current_stamp() - parseInt(evt.data.substring(5), 10);
             // dataChannelLog.textContent += ' RTT ' + elapsed_ms + ' ms\n';
+            dataChannelLog.textContent += evt.data;
+            dataChannelLog.textContent += ' (latency: ' + elapsed_ms + ' ms)\n';
             dc.send('latency ' + elapsed_ms);
             console.log('Latency calculated:', elapsed_ms + ' ms'); // Log for debugging
         }
