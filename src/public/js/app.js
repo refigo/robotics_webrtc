@@ -130,7 +130,9 @@ welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 
 socket.on("welcome", async () => {
     myDataChannel = myPeerConnection.createDataChannel("chat");
-    myDataChannel.addEventListener("message", console.log);
+    myDataChannel.addEventListener("message", (event) => {
+        console.log(event.data);
+    });
     console.log("made data channel")
 
     const offer = await myPeerConnection.createOffer();
@@ -140,7 +142,13 @@ socket.on("welcome", async () => {
 });
 
 socket.on("offer", async (offer) => {
-    myPeerConnection.addEventLister("datachannel", console.log);
+    myPeerConnection.addEventListener("datachannel", (event) => {
+        myDataChannel = event.channel;
+        myDataChannel.addEventListener("message", (event) => {
+            console.log(event.data);
+        });
+    });
+
     console.log("received the offer")
     myPeerConnection.setRemoteDescription(offer);
     const answer = await myPeerConnection.createAnswer();
