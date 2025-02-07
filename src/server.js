@@ -36,10 +36,18 @@ function publicRooms() {
     const publicRooms = [];
     rooms.forEach((_, key) => {
         if (sids.get(key) === undefined) {
-            publicRooms.push(key);
+            const userCount = countRoomMembers(key);
+            publicRooms.push({
+                roomName: key,
+                userCount
+            });
         }
     });
     return publicRooms;
+}
+
+function countRoomMembers(roomName) {
+    return wsServer.sockets.adapter.rooms.get(roomName)?.size || 0;
 }
 
 
@@ -51,6 +59,11 @@ wsServer.on("connection", (socket) => {
         console.log(`Socket Event: ${event}`);
     });
     socket.on("join_room", (roomName, done) => {
+        const roomSize = countRoomMembers(roomName);
+        if (roomSize >= 2) {
+            socket.emit("room_full");
+            return;
+        }
         socket.join(roomName);
         console.log(`roomName: ${roomName}`);
         done();
@@ -90,4 +103,3 @@ wsServer.on("connection", (socket) => {
 
 const handleListen = () => console.log(`Listening on: http://localhost:3000`);
 httpServer.listen(3000, handleListen);
-

@@ -16,12 +16,13 @@ html(lang="en")
                 h4 Open Rooms List (Create or Join a room):
                 ul
             div#room
-                h3
+                h2
                 form#name
                     h4 Current your nickname: 
                     input(placeholder="nickname", required, type="text")
                     button Save
                 div#call
+                    h3 Video Call
                     div#myStream
                         div#videoContainer(style="display: flex; gap: 10px;")
                             video#myFace(autoplay, playsinline, width="400", height="400")
@@ -29,6 +30,7 @@ html(lang="en")
                         button#mute Unmute
                         button#camera Turn Camera On
                         select#cameras
+                h3 Chat
                 ul
                 form#msg
                     input(placeholder="message", required, type="text")

@@ -176,8 +176,8 @@ function handleLeaveRoom(event) {
 function showRoom() {
     welcome.hidden = true;
     room.hidden = false;
-    const h3 = room.querySelector('h3');
-    h3.innerText = `Room ${roomName}`;
+    const h2 = room.querySelector('h2');
+    h2.innerText = `Room ${roomName}`;
     const msgForm = room.querySelector('#msg');
     nicknameDisplay.innerText = `Current your nickname: ${nickname}`;
     msgForm.addEventListener('submit', handleMessageSubmit);
@@ -248,18 +248,22 @@ socket.on('bye', (left) => {
 
 socket.on('new_message', addMessage);
 
-
-socket.on('room_change', (rooms) => {
-    const roomList = welcome.querySelector('ul');
-    roomList.innerHTML = '';
+socket.on("room_change", (rooms) => {
+    const roomList = welcome.querySelector("ul");
+    roomList.innerHTML = "";
     if (rooms.length === 0) {
         return;
     }
     rooms.forEach((room) => {
-        const li = document.createElement('li');
-        li.innerText = room;
+        const li = document.createElement("li");
+        li.innerText = `${room.roomName} (${room.userCount}/2)`;
         roomList.append(li);
     });
+});
+
+socket.on("room_full", () => {
+    alert("This room is full. Maximum 2 users allowed.");
+    window.location.reload();
 });
 
 // RTC Code
