@@ -19,11 +19,11 @@ const cameraBtn = document.getElementById("camera");
 const camerasSelect = document.getElementById("cameras");
 const call = document.getElementById("call");
 
-call.hidden = true
+// call.hidden = true
 
 let myStream;
-let muted = false;
-let cameraOff = false;
+let muted = true;
+let cameraOff = true;
 let roomName;
 let myPeerConnection;
 let myDataChannel;
@@ -50,11 +50,11 @@ async function getCameras() {
 
 async function getMedia(deviceId) {
     const initialConstraints = {
-        audio: false,
+        audio: true,
         video: { facingMode: "user" },
     };
     const cameraConstraints = {
-        audio: false,
+        audio: true,
         video: {
             deviceId: {
                 exact: deviceId,
@@ -65,6 +65,16 @@ async function getMedia(deviceId) {
         myStream = await navigator.mediaDevices.getUserMedia(
             deviceId ? cameraConstraints : initialConstraints
         );
+        if (muted) {
+            myStream.getAudioTracks()[0].enabled = false;
+        } else {
+            myStream.getAudioTracks()[0].enabled = true;
+        }
+        if (cameraOff) {
+            myStream.getVideoTracks()[0].enabled = false;
+        } else {
+            myStream.getVideoTracks()[0].enabled = true;
+        }
         myFace.srcObject = myStream; 
         if (!deviceId) {
             await getCameras();
@@ -118,22 +128,12 @@ camerasSelect.addEventListener("input", handleCameraChange);
 
 // Welcome Form (join a room)
 
-
-
-
-
 async function initCall() {
-    welcome.hidden = true;
-    call.hidden = false;
+    // welcome.hidden = true;
+    // call.hidden = false;
     await getMedia();
     makeConnection();
 }
-
-
-
-
-
-
 
 function showLobby() {
     welcome.hidden = false;
@@ -169,6 +169,7 @@ function handleNicknameSubmit(event) {
 
 function handleLeaveRoom(event) {
     console.log(`leave room!`);
+    cleanupWebRTC();
     socket.emit('leave_room', roomName, showLobby);
 }
 
@@ -188,7 +189,7 @@ function showRoom() {
 async function handleWelcomeSubmit(event) {
     event.preventDefault();
     const input = welcomeForm.querySelector("input");
-    // await initCall();
+    await initCall();
     socket.emit("join_room", input.value, showRoom);
     roomName = input.value;
     input.value = "";
@@ -241,7 +242,8 @@ socket.on("ice", (ice) => {
 })
 
 socket.on('bye', (left) => {
-    addMessage(`${left} left ㅠㅠ`);
+    // cleanupWebRTC();
+    addMessage(`${left} left the room. ㅠㅠ`);
 });
 
 socket.on('new_message', addMessage);
@@ -293,3 +295,28 @@ function handleAddStream(data) {
     peerFace.srcObject = data.stream;
 }
 
+function cleanupWebRTC() {
+    if (myPeerConnection) {
+        // Close data channel if it exists
+        if (myDataChannel) {
+            myDataChannel.close();
+            myDataChannel = null;
+        }
+
+        // Close all tracks
+        if (myStream) {
+            myStream.getTracks().forEach(track => {
+                track.stop();
+            });
+        }
+
+        // Close peer connection
+        myPeerConnection.close();
+        myPeerConnection = null;
+    }
+
+    // Clear video elements
+    if (myFace) myFace.srcObject = null;
+    const peerFace = document.getElementById("peerFace");
+    if (peerFace) peerFace.srcObject = null;
+}
