@@ -13,6 +13,19 @@ html(lang="en")
                 form
                     input(placeholder="room name", required, type="text")
                     button Enter room
+                h4 Open Rooms List (Create or Join a room):
+                ul
+            div#room
+                h3
+                ul
+                form#name
+                    h4 Current your nickname: 
+                    input(placeholder="nickname", required, type="text")
+                    button Save
+                form#msg
+                    input(placeholder="message", required, type="text")
+                    button Send
+                button#leave Leave Room
             div#call
                 div#myStream
                     video#myFace(autoplay, playsinline, width="400", height="400")

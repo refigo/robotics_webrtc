@@ -1,5 +1,18 @@
 const socket = io();
 
+
+const welcome = document.getElementById("welcome");
+const welcomeForm = welcome.querySelector("form");
+const room = document.getElementById('room');
+const nameForm = room.querySelector('#name');
+const nicknameDisplay = nameForm.querySelector('h4');
+
+room.hidden = true;
+
+let nickname = 'Anonymous';
+// let roomName;
+
+
 const myFace = document.getElementById("myFace");
 const muteBtn = document.getElementById("mute");
 const cameraBtn = document.getElementById("camera");
@@ -73,6 +86,7 @@ function handleMuteClick() {
         muted = false;
     }
 }
+
 function handleCameraClick() {
     myStream
         .getVideoTracks()
@@ -104,8 +118,9 @@ camerasSelect.addEventListener("input", handleCameraChange);
 
 // Welcome Form (join a room)
 
-const welcome = document.getElementById("welcome");
-const welcomeForm = welcome.querySelector("form");
+
+
+
 
 async function initCall() {
     welcome.hidden = true;
@@ -114,11 +129,67 @@ async function initCall() {
     makeConnection();
 }
 
+
+
+
+
+
+
+function showLobby() {
+    welcome.hidden = false;
+    room.hidden = true;
+    roomName = None;
+}
+
+function addMessage(message) {
+    const ul = room.querySelector('ul');
+    const li = document.createElement('li');
+    li.innerText = message;
+    ul.appendChild(li);
+}
+
+function handleMessageSubmit(event) {
+    event.preventDefault();
+    const input = room.querySelector('#msg input');
+    const value = input.value;
+    socket.emit('new_message', input.value, roomName, () => {
+        addMessage(`You(${nickname}): ${value}`);
+    });
+    input.value = '';
+}
+
+function handleNicknameSubmit(event) {
+    event.preventDefault();
+    const input = room.querySelector('#name input');
+    socket.emit('nickname', input.value);
+    nickname = input.value;
+    nicknameDisplay.innerText = `Current your nickname: ${nickname}`;
+    input.value = '';
+}
+
+function handleLeaveRoom(event) {
+    console.log(`leave room!`);
+    socket.emit('leave_room', roomName, showLobby);
+}
+
+function showRoom() {
+    welcome.hidden = true;
+    room.hidden = false;
+    const h3 = room.querySelector('h3');
+    h3.innerText = `Room ${roomName}`;
+    const msgForm = room.querySelector('#msg');
+    nicknameDisplay.innerText = `Current your nickname: ${nickname}`;
+    msgForm.addEventListener('submit', handleMessageSubmit);
+    nameForm.addEventListener('submit', handleNicknameSubmit);
+    const leaveBtn = room.querySelector('#leave');
+    leaveBtn.addEventListener('click', handleLeaveRoom);
+  }
+
 async function handleWelcomeSubmit(event) {
     event.preventDefault();
     const input = welcomeForm.querySelector("input");
-    await initCall();
-    socket.emit("join_room", input.value);
+    // await initCall();
+    socket.emit("join_room", input.value, showRoom);
     roomName = input.value;
     input.value = "";
 }
@@ -128,7 +199,7 @@ welcomeForm.addEventListener("submit", handleWelcomeSubmit);
 
 // Socket Code
 
-socket.on("welcome", async () => {
+socket.on("welcome", async (user) => {
     myDataChannel = myPeerConnection.createDataChannel("chat");
     myDataChannel.addEventListener("message", (event) => {
         console.log(event.data);
@@ -138,7 +209,8 @@ socket.on("welcome", async () => {
     const offer = await myPeerConnection.createOffer();
     myPeerConnection.setLocalDescription(offer);
     socket.emit("offer", offer, roomName);
-    console.log("sent the offer")
+    console.log("sent the offer");
+    addMessage(`${user} arrived!`);
 });
 
 socket.on("offer", async (offer) => {
@@ -168,6 +240,25 @@ socket.on("ice", (ice) => {
 
 })
 
+socket.on('bye', (left) => {
+    addMessage(`${left} left ㅠㅠ`);
+});
+
+socket.on('new_message', addMessage);
+
+
+socket.on('room_change', (rooms) => {
+    const roomList = welcome.querySelector('ul');
+    roomList.innerHTML = '';
+    if (rooms.length === 0) {
+        return;
+    }
+    rooms.forEach((room) => {
+        const li = document.createElement('li');
+        li.innerText = room;
+        roomList.append(li);
+    });
+});
 
 // RTC Code
 
