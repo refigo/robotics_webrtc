@@ -9,6 +9,10 @@ from aiortc import (
     RTCIceServer,
 )
 from aiortc.contrib.media import MediaPlayer, MediaBlackhole
+import pyrealsense2 as rs
+import numpy as np
+import av
+import fractions
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +20,80 @@ logging.basicConfig(level=logging.INFO)
 # === 기본 설정 ===
 ROOM = "room1"            # 접속할 방 이름 (노드 서버에서 최대 2명 제한)
 NICKNAME = "PythonClient" # 클라이언트 별칭 (필요에 따라 서버에 별도 전달 가능)
+
+class RealSenseStreamTrack:
+    def __init__(self):
+        self.kind = "video"
+        self.pipeline = None
+        self.config = None
+        self._start()
+        
+    def _start(self):
+        try:
+            # RealSense 파이프라인 설정
+            self.pipeline = rs.pipeline()
+            self.config = rs.config()
+            
+            # 사용 가능한 장치 찾기
+            ctx = rs.context()
+            devices = ctx.query_devices()
+            if len(devices) == 0:
+                raise Exception("RealSense 장치를 찾을 수 없습니다.")
+            
+            # 첫 번째 발견된 장치 사용
+            device = devices[0]
+            logging.info(f"RealSense 장치 발견: {device.get_info(rs.camera_info.name)}")
+            
+            # RGB 스트림 활성화 (1280x720 @ 30fps)
+            self.config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+            self.pipeline.start(self.config)
+            logging.info("RealSense 스트리밍 시작됨")
+            
+        except Exception as e:
+            logging.error(f"RealSense 초기화 실패: {e}")
+            if self.pipeline:
+                self.pipeline.stop()
+            raise
+    
+    async def recv(self):
+        pts = 0  # Presentation timestamp
+        frame_count = 0
+        try:
+            # 프레임 가져오기
+            frames = self.pipeline.wait_for_frames()
+            color_frame = frames.get_color_frame()
+            
+            if not color_frame:
+                raise Exception("컬러 프레임을 가져올 수 없습니다.")
+            
+            # numpy 배열로 변환
+            image = np.asanyarray(color_frame.get_data())
+            
+            # BGR에서 RGB로 변환
+            image = image[..., ::-1]
+            
+            # av.VideoFrame로 변환
+            frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+            
+            # 타임스탬프와 시간 설정
+            pts += 3000  # 30fps에서 각 프레임은 33.33ms (3000 units @ 90kHz)
+            frame.pts = pts
+            frame.time_base = fractions.Fraction(1, 90000)  # 90kHz timebase
+            
+            frame_count += 1
+            if frame_count % 30 == 0:  # 매 30프레임마다 로그
+                logging.info(f"비디오 프레임 전송 중... (frame #{frame_count})")
+            
+            return frame
+            
+        except Exception as e:
+            logging.error(f"프레임 수신 중 오류: {e}")
+            raise
+    
+    def stop(self):
+        if self.pipeline:
+            self.pipeline.stop()
+            logging.info("RealSense 스트리밍 중지됨")
 
 # python-socketio의 비동기 클라이언트 생성
 sio = socketio.AsyncClient()
@@ -31,7 +109,7 @@ player = None
 async def setup_peer_connection():
     """
     RTCPeerConnection을 생성하고, ICE 이벤트 및 데이터 채널/트랙 이벤트 핸들러를 등록한다.
-    가능한 경우 MediaPlayer를 이용하여 카메라/마이크 스트림을 추가한다.
+    가능한 경우 RealSense 카메라 스트림을 추가한다.
     """
     global pc, player
     # STUN 서버를 이용한 기본 RTCConfiguration
@@ -40,6 +118,21 @@ async def setup_peer_connection():
     )
     pc = RTCPeerConnection(configuration=configuration)
     logging.info("RTCPeerConnection 생성됨.")
+
+    # --- RealSense 스트림 추가 ---
+    try:
+        # RealSense 트랙 생성 및 추가
+        realsense_track = RealSenseStreamTrack()
+        pc.addTrack(realsense_track)
+        logging.info("RealSense 비디오 트랙이 추가됨")
+        
+        # 트랙 상태 확인
+        senders = pc.getSenders()
+        for sender in senders:
+            logging.info(f"로컬 트랙 정보: kind={sender.track.kind}, id={id(sender.track)}")
+    except Exception as e:
+        logging.warning(f"RealSense 스트림을 추가할 수 없습니다: {e}")
+        logging.info("비디오 스트림 없이 데이터 채널만 사용합니다.")
 
     # ICE candidate 발생시 이벤트 핸들러
     @pc.on("icecandidate")
@@ -52,7 +145,6 @@ async def setup_peer_connection():
                 "sdpMLineIndex": candidate.sdpMLineIndex,
             }
             logging.info("로컬 ICE candidate 발생: %s", candidate_data)
-            # 서버에 ICE candidate와 함께 방 이름을 함께 전송 (서버는 두 번째 인자는 room 식별용)
             await sio.emit("ice", (candidate_data, ROOM))
 
     # 상대측에서 데이터 채널이 생성되었을 경우 처리
@@ -69,32 +161,15 @@ async def setup_peer_connection():
     # 상대측의 미디어 스트림(트랙)이 추가될 경우
     @pc.on("track")
     def on_track(track):
-        logging.info("트랙 수신됨: %s", track.kind)
-        # 예시로, track를 소비하기 위해 MediaBlackhole(데이터 폐기기)를 사용할 수 있음.
+        logging.info(f"트랙 수신됨: kind={track.kind}")
         recorder = MediaBlackhole()
         recorder.addTrack(track)
         asyncio.ensure_future(recorder.start())
-        track.on("ended", lambda: asyncio.ensure_future(recorder.stop()))
-
-    # --- 미디어 스트림 추가 (카메라/마이크) ---
-    try:
-        # Linux의 경우 기본 카메라 장치: /dev/video0, v4l2 형식
-        player = MediaPlayer("/dev/video0", format="v4l2", options={"video_size": "640x480"})
-        logging.info("MediaPlayer를 통해 카메라 스트림을 가져옵니다.")
-    except Exception as e:
-        logging.warning("비디오 장치를 열 수 없습니다. 스트림 전송 없이 데이터 채널만 동작합니다. (%s)", e)
-        player = None
-
-    if player:
-        # player.audio, player.video는 각각 트랙 리스트 (없으면 None)
-        if player.audio:
-            for track in player.audio:
-                pc.addTrack(track)
-        if player.video:
-            for track in player.video:
-                pc.addTrack(track)
-    else:
-        logging.info("미디어 스트림 추가 없음.")
+        
+        @track.on("ended")
+        async def on_ended():
+            logging.info("트랙 종료됨: %s", track.kind)
+            await recorder.stop()
 
     return pc
 
