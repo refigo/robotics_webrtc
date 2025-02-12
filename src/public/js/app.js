@@ -1,6 +1,6 @@
 const socket = io();
 
-
+// DOM
 const welcome = document.getElementById("welcome");
 const welcomeForm = welcome.querySelector("form");
 const room = document.getElementById('room');
@@ -12,7 +12,7 @@ room.hidden = true;
 let nickname = 'Anonymous';
 // let roomName;
 
-
+// Video
 const myFace = document.getElementById("myFace");
 const muteBtn = document.getElementById("mute");
 const cameraBtn = document.getElementById("camera");
@@ -65,34 +65,24 @@ async function getMedia(deviceId) {
         myStream = await navigator.mediaDevices.getUserMedia(
             deviceId ? cameraConstraints : initialConstraints
         );
-        if (muted) {
-            myStream.getAudioTracks()[0].enabled = false;
-        } else {
-            myStream.getAudioTracks()[0].enabled = true;
-        }
-        if (cameraOff) {
-            myStream.getVideoTracks()[0].enabled = false;
-        } else {
-            myStream.getVideoTracks()[0].enabled = true;
-        }
-        myFace.srcObject = myStream; 
+    } catch (e) {
+        console.log("Local media access failed:", e);
+        // Create empty stream for local media
+        myStream = new MediaStream();
+        // Still proceed with the call setup
         if (!deviceId) {
             await getCameras();
         }
-    } catch (e) {
-        console.log(e);
-        // If we can't get both audio and video, try just audio
-        try {
-            myStream = await navigator.mediaDevices.getUserMedia({
-                audio: true,
-                video: false,
-            });
-        } catch (audioError) {
-            console.log("Could not get audio either:", audioError);
-            // Create empty stream if we can't get any media
-            myStream = new MediaStream();
-        }
     }
+    
+    if (muted) {
+        myStream.getAudioTracks().forEach(track => track.enabled = false);
+    }
+    if (cameraOff) {
+        myStream.getVideoTracks().forEach(track => track.enabled = false);
+    }
+    
+    myFace.srcObject = myStream; 
 }
 
 function handleMuteClick() {
@@ -308,8 +298,50 @@ function handleIce(data) {
 }
 
 function handleAddStream(data) {
+    console.log("Received remote stream", data.stream);
+    
     const peerFace = document.getElementById("peerFace");
-    peerFace.srcObject = data.stream;
+    if (!peerFace) {
+        console.error("peerFace element not found!");
+        return;
+    }
+    
+    // Log stream details
+    console.log("Remote stream details:", {
+        active: data.stream.active,
+        id: data.stream.id,
+        trackCount: data.stream.getTracks().length
+    });
+    
+    peerFace.srcObject = data.stream.getVideoTracks()[0]; // TODO: check this valid
+    
+    // Add event listeners to track stream status
+    data.stream.getTracks().forEach(track => {
+        console.log(`Remote track added:`, {
+            kind: track.kind,
+            enabled: track.enabled,
+            id: track.id,
+            readyState: track.readyState,
+            muted: track.muted
+        });
+        
+        track.onended = () => console.log(`Remote track ended: ${track.kind}`);
+        track.onmute = () => console.log(`Remote track muted: ${track.kind}`);
+        track.onunmute = () => console.log(`Remote track unmuted: ${track.kind}`);
+    });
+    
+    // Add video element event listeners
+    peerFace.onloadedmetadata = () => {
+        console.log("Video metadata loaded", {
+            videoWidth: peerFace.videoWidth,
+            videoHeight: peerFace.videoHeight
+        });
+        // Attempt to play the video
+        peerFace.play().catch(e => console.error("Error playing video:", e));
+    };
+    peerFace.onplay = () => console.log("Video started playing");
+    peerFace.onpause = () => console.log("Video paused");
+    peerFace.onerror = (e) => console.error("Video error:", e);
 }
 
 function cleanupWebRTC() {
