@@ -81,6 +81,17 @@ async function getMedia(deviceId) {
         }
     } catch (e) {
         console.log(e);
+        // If we can't get both audio and video, try just audio
+        try {
+            myStream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: false,
+            });
+        } catch (audioError) {
+            console.log("Could not get audio either:", audioError);
+            // Create empty stream if we can't get any media
+            myStream = new MediaStream();
+        }
     }
 }
 
@@ -284,9 +295,11 @@ function makeConnection() {
     });
     myPeerConnection.addEventListener("icecandidate", handleIce);
     myPeerConnection.addEventListener("addstream", handleAddStream);
-    myStream
-        .getTracks()
-        .forEach((track) => myPeerConnection.addTrack(track, myStream));
+    
+    // Only add tracks if we have a stream with tracks
+    if (myStream && myStream.getTracks().length > 0) {
+        myStream.getTracks().forEach((track) => myPeerConnection.addTrack(track, myStream));
+    }
 }
 
 function handleIce(data) {
