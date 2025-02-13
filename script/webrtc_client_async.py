@@ -7,134 +7,169 @@ from aiortc import (
     RTCIceCandidate,
     RTCConfiguration,
     RTCIceServer,
+    MediaStreamTrack,
 )
 from aiortc.contrib.media import MediaPlayer, MediaBlackhole
-import pyrealsense2 as rs
-import numpy as np
 import av
 import fractions
+import cv2
 
-# 로깅 설정
+# Logging configuration
 logging.basicConfig(level=logging.INFO)
 
-# === 기본 설정 ===
-ROOM = "room1"            # 접속할 방 이름 (노드 서버에서 최대 2명 제한)
-NICKNAME = "PythonClient" # 클라이언트 별칭 (필요에 따라 서버에 별도 전달 가능)
+# === Basic Settings ===
+ROOM = "room1"            # Room name to connect (max 2 people limit on node server)
+NICKNAME = "PythonClient" # Client nickname (can be separately sent to server if needed)
 
-class RealSenseStreamTrack:
-    def __init__(self):
-        self.kind = "video"
-        self.pipeline = None
-        self.config = None
-        self._start()
-        
-    def _start(self):
-        try:
-            # RealSense 파이프라인 설정
-            self.pipeline = rs.pipeline()
-            self.config = rs.config()
-            
-            # 사용 가능한 장치 찾기
-            ctx = rs.context()
-            devices = ctx.query_devices()
-            if len(devices) == 0:
-                raise Exception("RealSense 장치를 찾을 수 없습니다.")
-            
-            # 첫 번째 발견된 장치 사용
-            device = devices[0]
-            logging.info(f"RealSense 장치 발견: {device.get_info(rs.camera_info.name)}")
-            
-            # RGB 스트림 활성화 (1280x720 @ 30fps)
-            self.config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-            self.pipeline.start(self.config)
-            logging.info("RealSense 스트리밍 시작됨")
-            
-        except Exception as e:
-            logging.error(f"RealSense 초기화 실패: {e}")
-            if self.pipeline:
-                self.pipeline.stop()
-            raise
-    
+class VideoStreamTrack(MediaStreamTrack):
+    kind = "video"
+
+    def __init__(self, capture):
+        super().__init__()
+        self.capture = capture
+        self.pts = 0
+
     async def recv(self):
-        pts = 0  # Presentation timestamp
-        frame_count = 0
-        try:
-            # 프레임 가져오기
-            frames = self.pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-            
-            if not color_frame:
-                raise Exception("컬러 프레임을 가져올 수 없습니다.")
-            
-            # numpy 배열로 변환
-            image = np.asanyarray(color_frame.get_data())
-            
-            # BGR에서 RGB로 변환
-            image = image[..., ::-1]
-            
-            # av.VideoFrame로 변환
-            frame = av.VideoFrame.from_ndarray(image, format="rgb24")
-            
-            # 타임스탬프와 시간 설정
-            pts += 3000  # 30fps에서 각 프레임은 33.33ms (3000 units @ 90kHz)
-            frame.pts = pts
-            frame.time_base = fractions.Fraction(1, 90000)  # 90kHz timebase
-            
-            frame_count += 1
-            if frame_count % 30 == 0:  # 매 30프레임마다 로그
-                logging.info(f"비디오 프레임 전송 중... (frame #{frame_count})")
-            
-            return frame
-            
-        except Exception as e:
-            logging.error(f"프레임 수신 중 오류: {e}")
-            raise
-    
-    def stop(self):
-        if self.pipeline:
-            self.pipeline.stop()
-            logging.info("RealSense 스트리밍 중지됨")
+        pts = self.pts
+        self.pts += 3000  # 33.33ms per frame at 30fps (3000 units @ 90kHz)
 
-# python-socketio의 비동기 클라이언트 생성
+        ret, frame = self.capture.read()
+        if not ret:
+            raise Exception("Cannot read frame from camera")
+
+        # BGR to RGB conversion
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Convert to av.VideoFrame
+        video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+        video_frame.pts = pts
+        video_frame.time_base = fractions.Fraction(1, 90000)  # 90kHz timebase
+
+        return video_frame
+
+    def stop(self):
+        if self.capture is not None:
+            self.capture.release()
+
+class AudioStreamTrack(MediaStreamTrack):
+    kind = "audio"
+
+    def __init__(self, input_device_index=None):
+        super().__init__()
+        import sounddevice as sd
+        self.stream = sd.InputStream(
+            channels=1,
+            samplerate=48000,
+            dtype='float32',
+            device=input_device_index
+        )
+        self.stream.start()
+        self.pts = 0
+
+    async def recv(self):
+        pts = self.pts
+        self.pts += 960  # 20ms at 48kHz
+
+        # Read audio data
+        frame, _ = self.stream.read(960)  # 20ms of audio at 48kHz
+        frame = av.AudioFrame.from_ndarray(
+            frame,
+            format='flt',
+            layout='mono',
+            # rate=48000
+        )
+        frame.pts = pts
+        frame.time_base = fractions.Fraction(1, 48000)
+        return frame
+
+    def stop(self):
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream.close()
+
+def list_media_devices():
+    video_devices = []
+    # Search for video devices using OpenCV
+    index = 0
+    while True:
+        cap = cv2.VideoCapture(index)
+        if not cap.isOpened():
+            break
+        name = f"Video Device {index}"
+        video_devices.append({"index": index, "name": name})
+        cap.release()
+        index += 1
+
+    # Search for audio devices
+    audio_devices = []
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+        for i, device in enumerate(devices):
+            if device['max_input_channels'] > 0:
+                audio_devices.append({
+                    "index": i,
+                    "name": device['name']
+                })
+    except Exception as e:
+        logging.warning(f"Failed to search audio devices: {e}")
+
+    return video_devices, audio_devices
+
+# Create python-socketio asynchronous client
 sio = socketio.AsyncClient()
 
-# 전역 변수: RTCPeerConnection, 데이터 채널, 미디어 플레이어
+# Global variables: RTCPeerConnection, data channel, media player
 pc = None
 data_channel = None
 player = None
 
 # ---------------------------
-# 1. RTCPeerConnection 및 미디어 스트림 설정
+# 1. RTCPeerConnection and media stream setup
 # ---------------------------
 async def setup_peer_connection():
     """
-    RTCPeerConnection을 생성하고, ICE 이벤트 및 데이터 채널/트랙 이벤트 핸들러를 등록한다.
-    가능한 경우 RealSense 카메라 스트림을 추가한다.
+    Creates RTCPeerConnection and registers ICE event and data channel/track event handlers.
+    Searches for available media devices and adds streams.
     """
     global pc, player
-    # STUN 서버를 이용한 기본 RTCConfiguration
+    # Basic RTCConfiguration using STUN server
     configuration = RTCConfiguration(
         iceServers=[RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
     )
     pc = RTCPeerConnection(configuration=configuration)
-    logging.info("RTCPeerConnection 생성됨.")
+    logging.info("RTCPeerConnection created.")
 
-    # --- RealSense 스트림 추가 ---
+    # --- Search and add media devices ---
     try:
-        # RealSense 트랙 생성 및 추가
-        realsense_track = RealSenseStreamTrack()
-        pc.addTrack(realsense_track)
-        logging.info("RealSense 비디오 트랙이 추가됨")
+        video_devices, audio_devices = list_media_devices()
         
-        # 트랙 상태 확인
+        if video_devices:
+            # Use first video device
+            cap = cv2.VideoCapture(video_devices[0]["index"])
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                video_track = VideoStreamTrack(cap)
+                pc.addTrack(video_track)
+                logging.info(f"Video track added: {video_devices[0]['name']}")
+
+        if audio_devices:
+            # Use first audio device
+            audio_track = AudioStreamTrack(audio_devices[0]["index"])
+            pc.addTrack(audio_track)
+            logging.info(f"Audio track added: {audio_devices[0]['name']}")
+
+        # Check track status
         senders = pc.getSenders()
         for sender in senders:
-            logging.info(f"로컬 트랙 정보: kind={sender.track.kind}, id={id(sender.track)}")
+            logging.info(f"Local track info: kind={sender.track.kind}, id={id(sender.track)}")
     except Exception as e:
-        logging.warning(f"RealSense 스트림을 추가할 수 없습니다: {e}")
-        logging.info("비디오 스트림 없이 데이터 채널만 사용합니다.")
+        logging.warning(f"Cannot add media stream: {e}")
+        logging.info("Using data channel only without media stream")
 
-    # ICE candidate 발생시 이벤트 핸들러
+    # ICE candidate event handler
     @pc.on("icecandidate")
     async def on_icecandidate(event):
         candidate = event.candidate
@@ -144,117 +179,117 @@ async def setup_peer_connection():
                 "sdpMid": candidate.sdpMid,
                 "sdpMLineIndex": candidate.sdpMLineIndex,
             }
-            logging.info("로컬 ICE candidate 발생: %s", candidate_data)
+            logging.info("Local ICE candidate generated: %s", candidate_data)
             await sio.emit("ice", (candidate_data, ROOM))
 
-    # 상대측에서 데이터 채널이 생성되었을 경우 처리
+    # Handle when data channel is created by peer
     @pc.on("datachannel")
     def on_datachannel(channel):
         global data_channel
         data_channel = channel
-        logging.info("데이터 채널 수신됨: %s", channel.label)
+        logging.info("Data channel received: %s", channel.label)
 
         @data_channel.on("message")
         def on_message(message):
-            logging.info("데이터 채널 메시지 수신: %s", message)
+            logging.info("Data channel message received: %s", message)
 
-    # 상대측의 미디어 스트림(트랙)이 추가될 경우
+    # When peer's media stream (track) is added
     @pc.on("track")
     def on_track(track):
-        logging.info(f"트랙 수신됨: kind={track.kind}")
+        logging.info(f"Track received: kind={track.kind}")
         recorder = MediaBlackhole()
         recorder.addTrack(track)
         asyncio.ensure_future(recorder.start())
         
         @track.on("ended")
         async def on_ended():
-            logging.info("트랙 종료됨: %s", track.kind)
+            logging.info("Track ended: %s", track.kind)
             await recorder.stop()
 
     return pc
 
 # ---------------------------
-# 2. Socket.IO 이벤트 핸들러
+# 2. Socket.IO event handlers
 # ---------------------------
 @sio.event
 async def connect():
-    logging.info("시그널링 서버에 연결됨.")
-    logging.info("방 '%s' 에 입장 요청...", ROOM)
+    logging.info("Connected to signaling server.")
+    logging.info("Requesting to join room '%s'...", ROOM)
     
     async def on_join_complete(*args):
-        logging.info("방 '%s' 에 성공적으로 입장함", ROOM)
+        logging.info("Successfully joined room '%s'", ROOM)
     
     await sio.emit("join_room", ROOM, callback=on_join_complete)
 
 @sio.event
 async def disconnect():
-    logging.info("시그널링 서버와의 연결이 끊어짐.")
+    logging.info("Disconnected from signaling server.")
 
-# 방에 입장한 다른 사용자가 있을 경우 서버에서 "welcome" 이벤트가 발생함
+# When server sends "welcome" event after another user joins the room
 @sio.on("welcome")
 async def on_welcome(user):
-    logging.info("'%s' 가 입장하여 welcome 이벤트 수신됨.", user)
+    logging.info("'%s' joined and welcome event received.", user)
     global pc, data_channel
     if pc is None:
         await setup_peer_connection()
 
-    # [Offerer] – 주도측에서는 데이터 채널을 직접 생성
+    # [Offerer] – Create data channel
     data_channel = pc.createDataChannel("chat")
-    logging.info("데이터 채널 생성됨 (label=%s)", data_channel.label)
+    logging.info("Data channel created (label=%s)", data_channel.label)
 
     @data_channel.on("message")
     def on_message(message):
-        logging.info("데이터 채널 메시지 수신: %s", message)
+        logging.info("Data channel message received: %s", message)
 
-    # offer 생성, 로컬 SDP 설정 후 시그널링 서버로 전송
+    # Create offer, set local SDP, and send to signaling server
     offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     offer_data = {"type": pc.localDescription.type, "sdp": pc.localDescription.sdp}
-    logging.info("Offer 생성 후 전송: %s", offer_data)
+    logging.info("Offer created and sent: %s", offer_data)
     await sio.emit("offer", (offer_data, ROOM))
 
-# 상대방이 offer를 보낸 경우 (Answerer)
+# When peer sends offer (Answerer)
 @sio.on("offer")
 async def on_offer(offer_data):
-    logging.info("Offer 수신: %s", offer_data)
+    logging.info("Offer received: %s", offer_data)
     global pc
     if pc is None:
         await setup_peer_connection()
 
-    # 원격 SDP 설정
+    # Set remote SDP
     offer = RTCSessionDescription(sdp=offer_data["sdp"], type=offer_data["type"])
     await pc.setRemoteDescription(offer)
 
-    # answer 생성, 로컬 SDP 설정 후 전송
+    # Create answer, set local SDP, and send to signaling server
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     answer_data = {"type": pc.localDescription.type, "sdp": pc.localDescription.sdp}
-    logging.info("Answer 생성 후 전송: %s", answer_data)
+    logging.info("Answer created and sent: %s", answer_data)
     await sio.emit("answer", (answer_data, ROOM))
     
-# 상대방이 answer를 보낸 경우 (Offerer)
+# When peer sends answer (Offerer)
 @sio.on("answer")
 async def on_answer(answer_data):
-    logging.info("Answer 수신: %s", answer_data)
+    logging.info("Answer received: %s", answer_data)
     global pc
     answer = RTCSessionDescription(sdp=answer_data["sdp"], type=answer_data["type"])
     await pc.setRemoteDescription(answer)
 
-# ICE candidate 시그널링 처리
+# ICE candidate signaling
 @sio.on("ice")
 async def on_ice(ice_data):
     if ice_data is None:
-        logging.info("ICE gathering 완료 (null candidate)")
+        logging.info("ICE gathering complete (null candidate)")
         return
         
     try:
-        logging.info("원격 ICE candidate 수신: %s", ice_data)
-        # aiortc의 RTCIceCandidate는 인자 이름이 다름 (candidate -> sdpMid, sdpMLineIndex, foundation 등)
+        logging.info("Remote ICE candidate received: %s", ice_data)
+        # aiortc's RTCIceCandidate has different argument names (candidate -> sdpMid, sdpMLineIndex, foundation, etc.)
         candidate_str = ice_data.get("candidate", "")
         if not candidate_str:
             return
             
-        # candidate 문자열에서 필요한 정보 추출
+        # Extract necessary information from candidate string
         parts = candidate_str.split()
         foundation = parts[0].split(":")[1]
         component = int(parts[1])
@@ -277,35 +312,35 @@ async def on_ice(ice_data):
         )
         await pc.addIceCandidate(candidate)
     except Exception as e:
-        logging.error("ICE candidate 처리 중 오류 발생: %s", e)
+        logging.error("Error processing ICE candidate: %s", e)
 
-# 기타 이벤트 처리 (예: 사용자가 방을 떠날 경우)
+# Other event handlers (e.g., when user leaves the room)
 @sio.on("bye")
 async def on_bye(user):
-    logging.info("'%s' 가 방을 떠남.", user)
+    logging.info("'%s' left the room.", user)
 
-# (선택사항) 새로운 채팅 메시지 수신 – 브라우저 클라이언트의 "new_message" 이벤트와 대응
+# (Optional) New chat message received – corresponds to browser client's "new_message" event
 @sio.on("new_message")
 async def on_new_message(message):
-    logging.info("채팅 메시지 수신: %s", message)
+    logging.info("Chat message received: %s", message)
 
-# (선택사항) 방이 꽉 찼을 경우 처리
+# (Optional) Room is full
 @sio.on("room_full")
 async def on_room_full():
-    logging.warning("방이 꽉 찼습니다. 연결을 종료합니다.")
+    logging.warning("Room is full. Disconnecting.")
     await sio.disconnect()
 
 # ---------------------------
-# 3. 메인 루프: 시그널링 서버에 연결
+# 3. Main loop: Connect to signaling server
 # ---------------------------
 async def main():
-    # 시그널링 서버 주소 (Node.js 서버)
+    # Signaling server URL (Node.js server)
     await sio.connect("http://localhost:3000")
-    logging.info("메인 루프 시작. Ctrl+C 로 종료 가능.")
+    logging.info("Main loop started. Press Ctrl+C to exit.")
     await sio.wait()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("프로그램 종료")
+        logging.info("Program exited")

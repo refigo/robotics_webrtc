@@ -313,7 +313,7 @@ function handleAddStream(data) {
         trackCount: data.stream.getTracks().length
     });
     
-    peerFace.srcObject = data.stream.getVideoTracks()[0]; // TODO: check this valid
+    peerFace.srcObject = data.stream;
     
     // Add event listeners to track stream status
     data.stream.getTracks().forEach(track => {
