@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 
-# Importing necessary libraries
-import argparse
 import asyncio
-import json
 import logging
 import os
-import ssl
-import uuid
-import time
-import cv2
 import threading
 import rclpy
-import cv_bridge 
 from rclpy.node import Node
+import cv_bridge 
 from sensor_msgs.msg import Image
-from aiohttp import web
-from av import VideoFrame
-from fractions import Fraction
-from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+import cv2
+import time
+import numpy as np
 
-# Setting up logging and global variables
+from .webrtc import (
+    VideoStreamTrack,
+    AudioStreamTrack,
+    list_media_devices,
+    WebRTCHttpServer,
+    WebRTCSocketIOClient,
+)
+
+# Setting up logging
 ROOT = os.path.dirname(__file__)
-logger = logging.getLogger("pc")
-pcs = set()
+logger = logging.getLogger("webrtc_streaming")
+logging.basicConfig(level=logging.INFO)
 
 class Intermediate(Node):
     """
@@ -36,11 +36,18 @@ class Intermediate(Node):
         self.last_time = time.time()
         self.fps = 30
         self.lock = threading.Lock()
-        self.latest_image = None
-        self.placeholder_image = cv2.imread("placeholder.jpg")
+        # self.latest_image = None
+        
+        # Create a black placeholder image instead of loading from file
+        self.placeholder_image = np.zeros((480, 640, 3), dtype=np.uint8)
+        
+        # Initialize image buffer
         self.new_image = None
+        self.image_received = False
+        
         self.rtt = None
-        self.manual_resolution = (1920, 1080)
+        # self.manual_resolution = (1920, 1080)
+        self.manual_resolution = (640, 480)  # Start with a more reasonable resolution
         self.mode = mode
         logger.info("Intermediate Node initialized in %s mode", self.mode)
 
@@ -54,10 +61,33 @@ class Intermediate(Node):
             if self.mode == "manual":
                 resized_image = cv2.resize(cv_image, self.manual_resolution)
                 self.new_image = resized_image
+                # logger.debug("Updated image in manual mode, shape: %s", resized_image.shape)
             else:
                 resized_image = self.resize_image(cv_image)
                 self.new_image = resized_image
+                # logger.debug("Updated image in auto mode, shape: %s", resized_image.shape)
             self.last_time = current_time
+        # try:
+        #     current_time = time.time()
+        #     if current_time - self.last_time >= 1.0 / self.fps:
+        #         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+                
+        #         with self.lock:
+        #             if self.mode == "manual":
+        #                 resized_image = cv2.resize(cv_image, self.manual_resolution)
+        #                 self.new_image = resized_image
+        #                 logger.debug("Updated image in manual mode, shape: %s", resized_image.shape)
+        #             else:
+        #                 resized_image = self.resize_image(cv_image)
+        #                 self.new_image = resized_image
+        #                 logger.debug("Updated image in auto mode, shape: %s", resized_image.shape)
+                    
+        #             self.image_received = True
+        #             self.last_time = current_time
+                    
+        # except Exception as e:
+        #     logger.error("Error in image_callback: %s", e)
+
 
     def update_bandwidth(self, msg):
         """
@@ -96,196 +126,111 @@ class Intermediate(Node):
         """
         Returns the latest processed image or a placeholder if none available.
         """
-        return self.new_image if self.new_image is not None else self.placeholder_image
+        if self.new_image is not None:
+            logger.debug("Returning latest image, shape: %s", self.new_image.shape)
+            return self.new_image
+        logger.debug("No image available, returning placeholder")
+        return self.placeholder_image
+        # with self.lock:
+        #     if self.image_received and self.new_image is not None:
+        #         logger.debug("Returning latest image, shape: %s", self.new_image.shape)
+        #         return self.new_image
+            
+        #     logger.debug("No image available, returning placeholder")
+        #     return self.placeholder_image
 
-class ImageVideoTrack(MediaStreamTrack):
+class WebRTCStreamingNode(Node):
     """
-    MediaStreamTrack for video, streaming images from the ROS node.
+    Main ROS2 node that integrates HTTP server and Socket.IO client for WebRTC streaming
     """
-    kind = "video"
+    def __init__(self):
+        super().__init__('webrtc_streaming_node')
+        
+        # Initialize the intermediate node for image processing
+        self.intermediate = Intermediate()
+        
+        # Initialize HTTP server
+        self.http_server = WebRTCHttpServer(ROOT, self.intermediate)
+        
+        # Initialize Socket.IO client
+        self.socketio_client = WebRTCSocketIOClient(self.intermediate)
+        
+        logger.info("WebRTC Streaming Node initialized")
 
-    def __init__(self, intermediate_node):
-        super().__init__()
-        self.start_time = time.time()
-        self.frames = 0
-        self.framerate = 30
-        self.intermediate_node = intermediate_node
-
-    async def next_timestamp(self):
+    async def start(self):
         """
-        Calculates the timestamp for the next frame.
+        Start both HTTP server and Socket.IO client
         """
-        self.frames += 1
-        next_time = self.start_time + (self.frames / self.framerate)
-        await asyncio.sleep(max(0, next_time - time.time()))
-        return int((next_time - self.start_time) * 1000)
+        # Start HTTP server
+        await self.http_server.start()
+        
+        # Try to connect to signaling server, but don't fail if it's not available
+        try:
+            await self.socketio_client.connect()
+            logger.info("Connected to signaling server")
+        except Exception as e:
+            logger.warning(f"Could not connect to signaling server: {e}")
+            logger.info("Continuing with HTTP server only")
+        
+        logger.info("WebRTC Streaming Node started")
 
-    async def recv(self):
+    async def stop(self):
         """
-        Receives the next video frame to be sent to the peer.
+        Stop both HTTP server and Socket.IO client
         """
-        frame = await self.get_frame()
-        image_frame = VideoFrame.from_ndarray(frame, format="bgr24")
-        image_frame.pts = await self.next_timestamp()
-        image_frame.time_base = Fraction(1, 1000)
-        return image_frame
-
-    async def get_frame(self):
-        """
-        Retrieves the latest image frame from the intermediate node.
-        """
-        latest_frame = self.intermediate_node.get_latest_image()
-        await asyncio.sleep(1.0 / self.intermediate_node.fps)
-        return latest_frame
-
-# Web handler functions
-async def index(request):
-    """
-    Serves the index.html page.
-    """
-    content = open(os.path.join(ROOT, "index.html"), "r").read()
-    return web.Response(content_type="text/html", text=content)
-
-# Web handler functions
-async def index2(request):
-    """
-    Serves the index.html page.
-    """
-    content = open(os.path.join(ROOT, "index2.html"), "r").read()
-    return web.Response(content_type="text/html", text=content)
-
-async def javascript(request):
-    """
-    Serves the client.js JavaScript file.
-    """
-    content = open(os.path.join(ROOT, "client.js"), "r").read()
-    return web.Response(content_type="application/javascript", text=content)
-
-async def offer(request):
-    """
-    Handles the WebRTC offer from the client.
-    """
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-    client_resolutions = params["video_resolution"]
-
-    if intermediate_node.mode == "manual":
-        shape = client_resolutions.split('x')
-        new_resolution = (int(shape[0]), int(shape[1]))
-        intermediate_node.manual_resolution = new_resolution
-
-    pc = RTCPeerConnection()
-    pc_id = "PeerConnection(%s)" % uuid.uuid4()
-    pcs.add(pc)
-
-    def log_info(msg, *args):
-        """
-        Utility function for logging information.
-        """
-        logger.info(pc_id + " " + msg, *args)
-
-    log_info("Received WebRTC offer")
-
-    image_track = ImageVideoTrack(intermediate_node)
-    pc.addTrack(image_track)
-
-    @pc.on("datachannel")
-    def on_datachannel(channel):
-        @channel.on("message")
-        def on_message(message):
-            """
-            Processes incoming messages on the data channel.
-            """
-            if isinstance(message, str) and message.startswith("ping"):
-                log_info("Received ping message", message)
-                channel.send("pong" + message[4:])
-            # if isinstance(message, str) and message.startswith("latency"):
-            #     intermediate_node.rtt = int(message[7:])
-            #     log_info("Updated RTT to %d", intermediate_node.rtt)
-
-    @pc.on("iceconnectionstatechange")
-    async def on_iceconnectionstatechange():
-        """
-        Monitors the ICE connection state changes.
-        """
-        log_info("ICE connection state is %s", pc.iceConnectionState)
-        if pc.iceConnectionState == "failed":
-            await pc.close()
-            pcs.discard(pc)
-
-    await pc.setRemoteDescription(offer)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    return web.Response(
-        content_type="application/json",
-        text=json.dumps(
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
-        ),
-    )
-
-async def on_shutdown(app):
-    """
-    Handles the shutdown of the web application, closing all peer connections.
-    """
-    coros = [pc.close() for pc in pcs]
-    await asyncio.gather(*coros)
-    pcs.clear()
-
+        tasks = [self.http_server.stop()]
+        if self.socketio_client.sio.connected:
+            tasks.append(self.socketio_client.disconnect())
+        
+        await asyncio.gather(*tasks)
+        logger.info("WebRTC Streaming Node stopped")
 
 def main(args=None):
+    """
+    Main entry point for the ROS2 node
+    """
+    rclpy.init(args=args)
+    try:
+        asyncio.run(async_main(args))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        rclpy.shutdown()
 
-    parser = argparse.ArgumentParser(
-        description="WebRTC audio / video / data-channels demo"
-    )
-    parser.add_argument("--cert-file", help="SSL certificate file (for HTTPS)")
-    parser.add_argument("--key-file", help="SSL key file (for HTTPS)")
-    parser.add_argument(
-        "--host", default="0.0.0.0", help="Host for HTTP server (default: 0.0.0.0)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8081, help="Port for HTTP server (default: 8080)"
-    )
-    parser.add_argument("--verbose", "-v", action="count")
-    parser.add_argument("--write-audio", help="Write received audio to a file")
-    parser.add_argument("--mode", choices=["manual", "auto"], default="auto", help="Set mode to 'manual' or 'auto' (default: 'auto')")
-
-    # args = parser.parse_args()
-    args, unknown = parser.parse_known_args()
-
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    if args.cert_file:
-        ssl_context = ssl.SSLContext()
-        ssl_context.load_cert_chain(args.cert_file, args.key_file)
-    else:
-        ssl_context = None
-
-    # App initialization and ROS node creation
-    app = web.Application()
-    app.on_shutdown.append(on_shutdown)
-    app.router.add_get("/", index)
-    # app.router.add_get("/index2", index2)
-    app.router.add_get("/client.js", javascript)
-    app.router.add_post("/offer", offer)
-
-    rclpy.init()
-    global intermediate_node
-    intermediate_node = Intermediate(mode=args.mode)
-
-    # Start the ROS node in a separate thread
-    ros_thread = threading.Thread(target=lambda: rclpy.spin(intermediate_node), daemon=True)
-    ros_thread.start()
-
-    # Start the web application
-    web.run_app(
-        app, access_log=None, host=args.host, port=args.port, ssl_context=ssl_context
-    )
-
-    ros_thread.join()
+async def async_main(args=None):
+    """
+    Asynchronous main function
+    """
+    # Create and initialize the streaming node
+    node = WebRTCStreamingNode()
+    
+    # Run ROS2 node in a separate thread
+    executor = rclpy.executors.MultiThreadedExecutor()
+    executor.add_node(node)
+    executor.add_node(node.intermediate) # Good
+    
+    # Run ROS2 executor in a separate thread
+    executor_thread = threading.Thread(target=executor.spin)
+    executor_thread.start()
+    
+    try:
+        # Start the streaming node
+        await node.start()
+        
+        # Keep the program running
+        try:
+            await asyncio.gather(
+                node.socketio_client.sio.wait(),
+                asyncio.Event().wait()  # This will never complete
+            )
+        except asyncio.CancelledError:
+            pass
+            
+    finally:
+        # Cleanup
+        await node.stop()
+        executor.shutdown()
+        executor_thread.join()
 
 if __name__ == "__main__":
     main()
