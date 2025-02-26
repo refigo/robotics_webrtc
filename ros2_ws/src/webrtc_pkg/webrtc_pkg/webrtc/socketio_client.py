@@ -143,7 +143,7 @@ class WebRTCSocketIOClient:
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
             logger.info("Connection state is %s", self.pc.connectionState)
-            if self.pc.connectionState == "failed":
+            if self.pc.connectionState == "failed" or self.pc.connectionState == "closed":
                 await self.pc.close()
                 self.pc = None
 
