@@ -6,7 +6,12 @@ import uuid
 import logging
 import asyncio
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    RTCPeerConnection,
+    RTCSessionDescription,
+    RTCConfiguration,
+    RTCIceServer,
+)
 
 from .media import VideoStreamTrack, AudioStreamTrack, list_media_devices
 
@@ -23,6 +28,17 @@ class WebRTCHttpServer:
         self.app = None
         self.runner = None
         self.site = None
+        
+        # Configure ICE servers
+        self.ice_servers = [
+            RTCIceServer(urls=[
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+                "stun:stun3.l.google.com:19302",
+                "stun:stun4.l.google.com:19302",
+            ]),
+        ]
 
     def setup_routes(self):
         """
@@ -93,7 +109,7 @@ class WebRTCHttpServer:
             new_resolution = (int(shape[0]), int(shape[1]))
             self.intermediate.manual_resolution = new_resolution
 
-        pc = RTCPeerConnection()
+        pc = RTCPeerConnection(configuration=RTCConfiguration(iceServers=self.ice_servers))
         pc_id = f"HTTPPeerConnection({uuid.uuid4()})"
         self.pcs.add(pc)
 

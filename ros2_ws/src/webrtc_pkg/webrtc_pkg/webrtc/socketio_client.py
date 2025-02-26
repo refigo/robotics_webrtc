@@ -23,6 +23,17 @@ class WebRTCSocketIOClient:
         self.nickname = nickname
         self.sio = socketio.AsyncClient()
         self.pc = None
+        
+        # Configure ICE servers
+        self.ice_servers = [
+            RTCIceServer(urls=[
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+                "stun:stun3.l.google.com:19302",
+                "stun:stun4.l.google.com:19302",
+            ]),
+        ]
         self.setup_handlers()
 
     def setup_handlers(self):
@@ -73,27 +84,81 @@ class WebRTCSocketIOClient:
 
         @self.sio.on("ice")
         async def on_ice(ice_data):
-            if ice_data and self.pc:
+            if ice_data is None:
+                logging.info("ICE gathering complete (null candidate)")
+                return
+                
+            try:
+                logging.info("Remote ICE candidate received: %s", ice_data)
+                # aiortc's RTCIceCandidate has different argument names (candidate -> sdpMid, sdpMLineIndex, foundation, etc.)
+                candidate_str = ice_data.get("candidate", "")
+                if not candidate_str:
+                    return
+                    
+                # Extract necessary information from candidate string
+                parts = candidate_str.split()
+                foundation = parts[0].split(":")[1]
+                component = int(parts[1])
+                protocol = parts[2]
+                priority = int(parts[3])
+                ip = parts[4]
+                port = int(parts[5])
+                type = parts[7]
+                
                 candidate = RTCIceCandidate(
-                    sdpMid=ice_data["sdpMid"],
-                    sdpMLineIndex=ice_data["sdpMLineIndex"],
-                    candidate=ice_data["candidate"],
+                    foundation=foundation,
+                    component=component,
+                    protocol=protocol,
+                    priority=priority,
+                    ip=ip,
+                    port=port,
+                    type=type,
+                    sdpMid=ice_data.get("sdpMid"),
+                    sdpMLineIndex=ice_data.get("sdpMLineIndex")
                 )
                 await self.pc.addIceCandidate(candidate)
+            except Exception as e:
+                logging.error("Error processing ICE candidate: %s", e)
+            # if ice_data and self.pc:
+            #     candidate = RTCIceCandidate(
+            #         sdpMid=ice_data["sdpMid"],
+            #         sdpMLineIndex=ice_data["sdpMLineIndex"],
+            #         candidate=ice_data["candidate"],
+            #     )
+            #     await self.pc.addIceCandidate(candidate)
 
     async def setup_peer_connection(self):
         """
         Set up WebRTC peer connection
         """
-        configuration = RTCConfiguration(
-            iceServers=[RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
-        )
-        self.pc = RTCPeerConnection(configuration=configuration)
-        
+        if self.pc:
+            logger.warning("Peer connection already exists")
+            return
+
+        # Create peer connection with ICE servers
+        config = RTCConfiguration(iceServers=self.ice_servers)
+        self.pc = RTCPeerConnection(configuration=config)
+        logger.info("Created peer connection with ICE servers: %s", self.ice_servers)
+
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            logger.info("Connection state is %s", self.pc.connectionState)
+            if self.pc.connectionState == "failed":
+                await self.pc.close()
+                self.pc = None
+
+        @self.pc.on("iceconnectionstatechange")
+        async def on_iceconnectionstatechange():
+            logger.info("ICE connection state is %s", self.pc.iceConnectionState)
+
+        @self.pc.on("icegatheringstatechange")
+        async def on_icegatheringstatechange():
+            logger.info("ICE gathering state is %s", self.pc.iceGatheringState)
+
         # Add video track
         video_track = VideoStreamTrack(self.intermediate)
         self.pc.addTrack(video_track)
-        
+
         # Add audio track if available
         # try:
         #     _, audio_devices = list_media_devices()
@@ -106,25 +171,22 @@ class WebRTCSocketIOClient:
 
         @self.pc.on("icecandidate")
         async def on_icecandidate(event):
-            if event.candidate:
-                candidate_data = {
+            if event.candidate is None:
+                # ICE gathering is complete
+                await self.sio.emit("ice", (None, self.room))
+            else:
+                candidate_dict = {
                     "candidate": event.candidate.candidate,
                     "sdpMid": event.candidate.sdpMid,
                     "sdpMLineIndex": event.candidate.sdpMLineIndex,
                 }
-                await self.sio.emit("ice", (candidate_data, self.room))
-
-        @self.pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            logger.info("Connection state is %s", self.pc.connectionState)
-            if self.pc.connectionState == "failed":
-                await self.pc.close()
-                self.pc = None
+                await self.sio.emit("ice", (candidate_dict, self.room))
 
     async def connect(self, server_url='http://localhost:3000'):
         """
         Connect to the signaling server
         """
+        server_url = 'http://3.34.45.27:3000'
         await self.sio.connect(server_url)
 
     async def disconnect(self):

@@ -1,4 +1,3 @@
-
 // Main variables for logs and peer connection
 var dataChannelLog = document.getElementById('data-channel'),
     iceConnectionLog = document.getElementById('ice-connection-state'),
@@ -11,35 +10,42 @@ var dc = null, dcInterval = null; // DataChannel and its interval
 // Function to create a new peer connection
 function createPeerConnection() {
     var config = {
-        sdpSemantics: 'unified-plan'
+        sdpSemantics: 'unified-plan',
+        iceServers: [{
+            urls: [
+                'stun:stun.l.google.com:19302',
+                'stun:stun1.l.google.com:19302',
+                'stun:stun2.l.google.com:19302',
+                'stun:stun3.l.google.com:19302',
+                'stun:stun4.l.google.com:19302'
+            ]
+        }]
     };
 
+    pc = new RTCPeerConnection(config);
 
-    pc = new RTCPeerConnection(config); // Initialize the PeerConnection
+    // Log ICE connection state changes
+    pc.addEventListener('icegatheringstatechange', function() {
+        iceGatheringLog.textContent += ' -> ' + pc.iceGatheringState;
+        console.log('ICE Gathering State:', pc.iceGatheringState);
+    });
+    iceGatheringLog.textContent = pc.iceGatheringState;
 
-    // Event listeners for various peer connection states
+    pc.addEventListener('iceconnectionstatechange', function() {
+        iceConnectionLog.textContent += ' -> ' + pc.iceConnectionState;
+        console.log('ICE Connection State:', pc.iceConnectionState);
+    });
+    iceConnectionLog.textContent = pc.iceConnectionState;
 
-    // pc.addEventListener('icegatheringstatechange', function() {
-    //     iceGatheringLog.textContent += ' -> ' + pc.iceGatheringState;
-    //     console.log('ICE Gathering State changed:', pc.iceGatheringState); // Log for debugging
-    // }, false);
-    // iceGatheringLog.textContent = pc.iceGatheringState;
+    pc.addEventListener('signalingstatechange', function() {
+        signalingLog.textContent += ' -> ' + pc.signalingState;
+        console.log('Signaling State:', pc.signalingState);
+    });
+    signalingLog.textContent = pc.signalingState;
 
-    // pc.addEventListener('iceconnectionstatechange', function() {
-    //     iceConnectionLog.textContent += ' -> ' + pc.iceConnectionState;
-    //     console.log('ICE Connection State changed:', pc.iceConnectionState); // Log for debugging
-    // }, false);
-    // iceConnectionLog.textContent = pc.iceConnectionState;
-
-    // pc.addEventListener('signalingstatechange', function() {
-    //     signalingLog.textContent += ' -> ' + pc.signalingState;
-    //     console.log('Signaling State changed:', pc.signalingState); // Log for debugging
-    // }, false);
-    // signalingLog.textContent = pc.signalingState;
-
-    
+    // Handle incoming tracks (video/audio)
     pc.addEventListener('track', function(evt) {
-        console.log('Track event:', evt); // Log for debugging
+        console.log('Track event:', evt);
         if (evt.track.kind == 'video')
             document.getElementById('video').srcObject = evt.streams[0];
         else
