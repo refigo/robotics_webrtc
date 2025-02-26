@@ -139,7 +139,7 @@ async function initCall() {
 function showLobby() {
     welcome.hidden = false;
     room.hidden = true;
-    roomName = None;
+    roomName = null;
 }
 
 function addMessage(message) {
