@@ -18,7 +18,7 @@ import cv2
 logging.basicConfig(level=logging.INFO)
 
 # === Basic Settings ===
-ROOM = "room1"            # Room name to connect (max 2 people limit on node server)
+ROOM = "room2"            # Room name to connect (max 2 people limit on node server)
 NICKNAME = "PythonClient" # Client nickname (can be separately sent to server if needed)
 
 class VideoStreamTrack(MediaStreamTrack):
@@ -335,7 +335,9 @@ async def on_room_full():
 # ---------------------------
 async def main():
     # Signaling server URL (Node.js server)
-    await sio.connect("http://localhost:3000")
+    # server_url = "http://localhost:3000"
+    server_url = "http://3.34.45.27:3000"
+    await sio.connect(server_url)
     logging.info("Main loop started. Press Ctrl+C to exit.")
     await sio.wait()
 

@@ -10,7 +10,7 @@ from aiortc import (
     RTCIceServer,
 )
 from .media import VideoStreamTrack, AudioStreamTrack, list_media_devices
-import asyncio
+# import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,7 @@ class WebRTCSocketIOClient:
         async def on_connectionstatechange():
             logger.info("Connection state is %s", self.pc.connectionState)
             if self.pc.connectionState == "failed" or self.pc.connectionState == "closed":
+                logger.info("Closing peer connection")
                 await self.pc.close()
                 self.pc = None
 
@@ -189,8 +190,8 @@ class WebRTCSocketIOClient:
         logger.info("Offer created and set as local description")
         
         # Wait a bit for initial candidates to be gathered
-        while self.pc.iceGatheringState == "new":
-            await asyncio.sleep(0.1)
+        # while self.pc.iceGatheringState == "new":
+        #     await asyncio.sleep(0.1)
         
         await self.sio.emit("offer", ({
             "sdp": self.pc.localDescription.sdp, # offer.sdp
@@ -215,8 +216,8 @@ class WebRTCSocketIOClient:
         await self.pc.setLocalDescription(answer)
         
         # Wait a bit for initial candidates to be gathered
-        while self.pc.iceGatheringState == "new":
-            await asyncio.sleep(0.1)
+        # while self.pc.iceGatheringState == "new":
+        #     await asyncio.sleep(0.1)
             
         await self.sio.emit("answer", ({
             "sdp": self.pc.localDescription.sdp,
