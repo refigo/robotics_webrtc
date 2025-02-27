@@ -237,10 +237,27 @@ socket.on("answer", (answer) => {
 });
 
 socket.on("ice", (ice) => {
-    console.log("received candidate")
-    myPeerConnection.addIceCandidate(ice);
-
-})
+    if (!myPeerConnection) {
+        console.warn("[ICE] No peer connection to add candidate");
+        return;
+    }
+    
+    if (ice) {
+        const candidateStr = ice.candidate;
+        const parts = candidateStr.split(" ");
+        console.log("[ICE] Received candidate:", {
+            type: parts[7],          // host/srflx/relay
+            ip: parts[4],           // IP address
+            port: parts[5],         // Port number
+            protocol: parts[2],      // UDP/TCP
+            priority: parts[3]       // Priority
+        });
+        myPeerConnection.addIceCandidate(ice);
+    } else {
+        console.log("[ICE] Remote gathering complete - null candidate");
+    }
+    // console.log("received ICE candidate", ice);
+});
 
 socket.on('bye', (left) => {
     // cleanupWebRTC();
@@ -283,6 +300,22 @@ function makeConnection() {
             },
         ],
     });
+    console.log("[RTC] Created peer connection with config:", myPeerConnection.getConfiguration());
+
+    // Log all state changes
+    myPeerConnection.oniceconnectionstatechange = () => {
+        console.log("[ICE] Connection state changed:", myPeerConnection.iceConnectionState);
+    };
+    myPeerConnection.onicegatheringstatechange = () => {
+        console.log("[ICE] Gathering state changed:", myPeerConnection.iceGatheringState);
+    };
+    myPeerConnection.onconnectionstatechange = () => {
+        console.log("[RTC] Connection state changed:", myPeerConnection.connectionState);
+    };
+    myPeerConnection.onsignalingstatechange = () => {
+        console.log("[RTC] Signaling state changed:", myPeerConnection.signalingState);
+    };
+
     myPeerConnection.addEventListener("icecandidate", handleIce);
     myPeerConnection.addEventListener("addstream", handleAddStream);
     
@@ -293,8 +326,22 @@ function makeConnection() {
 }
 
 function handleIce(data) {
-    console.log("sent candidate")
+    if (data.candidate) {
+        const candidateStr = data.candidate.candidate;
+        const parts = candidateStr.split(" ");
+        console.log("[ICE] Generated candidate:", {
+            type: parts[7],          // host/srflx/relay
+            ip: parts[4],           // IP address
+            port: parts[5],         // Port number
+            protocol: parts[2],      // UDP/TCP
+            priority: parts[3],      // Priority
+            foundation: parts[0].split(":")[1]  // Foundation
+        });
+    } else {
+        console.log("[ICE] Gathering complete - null candidate");
+    }
     socket.emit("ice", data.candidate, roomName);
+    console.log("sent ICE candidate", data.candidate);
 }
 
 function handleAddStream(data) {

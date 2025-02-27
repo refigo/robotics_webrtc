@@ -12,6 +12,12 @@ from aiortc import (
 from .media import VideoStreamTrack, AudioStreamTrack, list_media_devices
 # import asyncio
 
+
+# debug mode
+# logging.basicConfig(level=logging.DEBUG)
+# logging.getLogger('aioice').setLevel(logging.DEBUG)
+# logging.getLogger('aiortc').setLevel(logging. DEBUG)
+
 logger = logging.getLogger(__name__)
 
 class WebRTCSocketIOClient:
@@ -77,6 +83,7 @@ class WebRTCSocketIOClient:
             offer = RTCSessionDescription(sdp=offer_data["sdp"], type=offer_data["type"])
             await self.pc.setRemoteDescription(offer)
             answer = await self.pc.createAnswer()
+            print(f'answer: {answer}')
             await self.pc.setLocalDescription(answer)
             logging.info("Answer created and sent: %s", {"sdp": answer.sdp, "type": answer.type})
             await self.sio.emit("answer", ({"sdp": answer.sdp, "type": answer.type}, self.room))
@@ -135,7 +142,11 @@ class WebRTCSocketIOClient:
             return
 
         # Create peer connection with ICE servers
-        config = RTCConfiguration(iceServers=self.ice_servers)
+        config = RTCConfiguration(
+            iceServers=self.ice_servers,
+            # iceTransportPolicy="all",  # all or relay
+            # iceCandidatePoolSize=10,   # increase candidate pool size
+        )
         self.pc = RTCPeerConnection(configuration=config)
         logger.info("Created new RTCPeerConnection")
 
@@ -143,7 +154,20 @@ class WebRTCSocketIOClient:
         async def on_icecandidate(event):
             logger.info("ICE candidate event triggered")
             if event.candidate:
+                # logging all candidates
+                logger.info("ICE candidate: %s", event.candidate.candidate)
+
                 candidate_str = event.candidate.candidate
+
+                # check candidate type
+                if "typ srflx" in candidate_str:
+                    ip = parts[4]
+                    logger.info("STUN discovered public IP: %s", ip)
+                elif "typ host" in candidate_str:
+                    logger.info("Local candidate: %s", parts[4])
+                elif "typ relay" in candidate_str:
+                    logger.info("Relay candidate: %s", parts[4])
+                
                 parts = candidate_str.split()
                 ip = parts[4] if len(parts) > 4 else "unknown"
                 typ = parts[parts.index("typ") + 1] if "typ" in parts else "unknown"
@@ -163,7 +187,7 @@ class WebRTCSocketIOClient:
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
             logger.info("Connection state is %s", self.pc.connectionState)
-            if self.pc.connectionState == "failed" or self.pc.connectionState == "closed":
+            if self.pc.connectionState == "closed" or self.pc.connectionState == "failed":
                 logger.info("Closing peer connection")
                 await self.pc.close()
                 self.pc = None
@@ -175,6 +199,10 @@ class WebRTCSocketIOClient:
         @self.pc.on("icegatheringstatechange")
         async def on_icegatheringstatechange():
             logger.info("ICE gathering state is %s", self.pc.iceGatheringState)
+            if self.pc.iceGatheringState == "complete" and self.pc.localDescription:
+                # all candidates gathered
+                all_candidates = self.pc.localDescription.sdp
+                logger.info("All gathered candidates: %s", all_candidates)
 
         # Add video track first before creating offer/answer
         video_track = VideoStreamTrack(self.intermediate)
@@ -210,6 +238,9 @@ class WebRTCSocketIOClient:
         logger.info("Setting remote description (offer)")
         await self.pc.setRemoteDescription(offer)
         
+        # Before make anser, stay ice gathering state "complete"
+        while self.pc.iceGatheringState != "complete":
+            await asyncio.sleep(0.1)
         logger.info("Creating answer")
         answer = await self.pc.createAnswer()
         logger.info("Setting local description (answer)")
@@ -220,8 +251,8 @@ class WebRTCSocketIOClient:
         #     await asyncio.sleep(0.1)
             
         await self.sio.emit("answer", ({
-            "sdp": self.pc.localDescription.sdp,
-            "type": self.pc.localDescription.type
+            "sdp": answer.sdp,
+            "type": answer.type
         }, self.room))
         logger.info("Answer sent to signaling server")
 
