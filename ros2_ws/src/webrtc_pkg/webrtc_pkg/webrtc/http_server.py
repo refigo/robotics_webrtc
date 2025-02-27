@@ -47,7 +47,7 @@ class WebRTCHttpServer:
         self.app = web.Application()
         self.app.on_shutdown.append(self.on_shutdown)
         self.app.router.add_get("/", self.index)
-        self.app.router.add_get("/index2", self.index2)
+        # self.app.router.add_get("/index2", self.index2)
         self.app.router.add_get("/client.js", self.javascript)
         self.app.router.add_post("/offer", self.handle_offer)
 
