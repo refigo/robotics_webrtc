@@ -275,7 +275,10 @@ socket.on("ice", (ice) => {
             });
             
             myPeerConnection.addIceCandidate(candidate)
-                .catch(err => console.error("[ICE] Error adding candidate:", err));
+                .catch((err) => {
+                    console.error("[ICE] Error adding candidate:", err);
+                    console.log("Error candidate: ", candidate);
+                });
         } else {
             console.warn("[ICE] Invalid candidate format:", candidateStr);
         }
