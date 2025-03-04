@@ -32,7 +32,7 @@ class Intermediate(Node):
     def __init__(self, mode="manual"):
         super().__init__('intermediate_node')
         self.bridge = cv_bridge.CvBridge()
-        self.image_subscriber = self.create_subscription(Image, '/camera/camera/color/image_raw', self.image_callback, 10)
+        self.image_subscriber = self.create_subscription(Image, '/camera/color/image_raw', self.image_callback, 10)
         self.last_time = time.time()
         self.fps = 30
         self.lock = threading.Lock()

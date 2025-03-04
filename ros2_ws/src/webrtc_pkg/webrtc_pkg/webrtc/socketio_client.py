@@ -10,6 +10,7 @@ from aiortc import (
     RTCIceTransport,
     RTCDtlsTransport,
     RTCConfiguration,
+    RTCIceCandidate
 )
 from .media import VideoStreamTrack, AudioStreamTrack, list_media_devices
 import asyncio
@@ -142,13 +143,39 @@ class WebRTCSocketIOClient:
             logger.warning("Peer connection already exists")
             return
 
+        # Create peer connection with gathered candidates
+        config = RTCConfiguration(
+            iceServers=self.ice_servers,
+        )
+        self.pc = RTCPeerConnection(configuration=config)
+        logger.info("Created new RTCPeerConnection")
+
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            logger.info("Connection state is %s", self.pc.connectionState)
+            if self.pc.connectionState == "closed" or self.pc.connectionState == "failed":
+                logger.info("Closing peer connection")
+                await self.pc.close()
+                self.pc = None
+
+        @self.pc.on("icegatheringstatechange")
+        async def on_icegatheringstatechange():
+            logger.info("ICE gathering state is %s", self.pc.iceGatheringState)
+            if self.pc.iceGatheringState == "complete" and self.pc.localDescription:
+                logger.info("ICE gathering complete")
+
+        # Add video track
+        video_track = VideoStreamTrack(self.intermediate)
+        self.pc.addTrack(video_track)
+        logger.info("Added video track to peer connection")
+
         # Create ICE gatherer first
         self.ice_gatherer = RTCIceGatherer(iceServers=self.ice_servers)
         logger.info("Created ICE gatherer")
 
         # Start gathering candidates
         await self.ice_gatherer.gather()
-        await asyncio.sleep(5)
+        await asyncio.sleep(1)
         
         # Get local candidates and parameters
         local_candidates = self.ice_gatherer.getLocalCandidates()
@@ -198,31 +225,6 @@ class WebRTCSocketIOClient:
             await self.sio.emit("ice", (candidate_dict, self.room))
             logger.info("Sent ICE candidate to signaling server")
 
-        # Create peer connection with gathered candidates
-        config = RTCConfiguration(
-            iceServers=self.ice_servers,
-        )
-        self.pc = RTCPeerConnection(configuration=config)
-        logger.info("Created new RTCPeerConnection")
-
-        @self.pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            logger.info("Connection state is %s", self.pc.connectionState)
-            if self.pc.connectionState == "closed" or self.pc.connectionState == "failed":
-                logger.info("Closing peer connection")
-                await self.pc.close()
-                self.pc = None
-
-        @self.pc.on("icegatheringstatechange")
-        async def on_icegatheringstatechange():
-            logger.info("ICE gathering state is %s", self.pc.iceGatheringState)
-            if self.pc.iceGatheringState == "complete" and self.pc.localDescription:
-                logger.info("ICE gathering complete")
-
-        # Add video track
-        video_track = VideoStreamTrack(self.intermediate)
-        self.pc.addTrack(video_track)
-        logger.info("Added video track to peer connection")
 
     async def create_and_send_offer(self):
         """Create and send offer"""
