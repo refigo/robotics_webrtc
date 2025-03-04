@@ -5,12 +5,14 @@ import socketio
 from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
-    RTCIceCandidate,
-    RTCConfiguration,
     RTCIceServer,
+    RTCIceGatherer,
+    RTCIceTransport,
+    RTCDtlsTransport,
+    RTCConfiguration,
 )
 from .media import VideoStreamTrack, AudioStreamTrack, list_media_devices
-# import asyncio
+import asyncio
 
 
 # debug mode
@@ -33,18 +35,19 @@ class WebRTCSocketIOClient:
         
         # Configure ICE servers
         self.ice_servers = [
-            RTCIceServer(urls="stun:stun.l.google.com:19302"),
-            RTCIceServer(urls="stun:stun1.l.google.com:19302"),
-            RTCIceServer(urls="stun:stun2.l.google.com:19302"),
-            RTCIceServer(urls="stun:stun3.l.google.com:19302"),
-            RTCIceServer(urls="stun:stun4.l.google.com:19302"),
-            RTCIceServer(urls=[
-                "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302",
-                "stun:stun2.l.google.com:19302",
-                "stun:stun3.l.google.com:19302",
-                "stun:stun4.l.google.com:19302",
-            ]),
+            RTCIceServer(urls="stun:3.34.132.103:3478"),
+            # RTCIceServer(urls="stun:stun.l.google.com:19302"),
+            # RTCIceServer(urls="stun:stun1.l.google.com:19302"),
+            # RTCIceServer(urls="stun:stun2.l.google.com:19302"),
+            # RTCIceServer(urls="stun:stun3.l.google.com:19302"),
+            # RTCIceServer(urls="stun:stun4.l.google.com:19302"),
+            # RTCIceServer(urls=[
+            #     "stun:stun.l.google.com:19302",
+            #     "stun:stun1.l.google.com:19302",
+            #     "stun:stun2.l.google.com:19302",
+            #     "stun:stun3.l.google.com:19302",
+            #     "stun:stun4.l.google.com:19302",
+            # ]),
         ]
         self.setup_handlers()
 
@@ -133,56 +136,74 @@ class WebRTCSocketIOClient:
                 logging.error("Error processing ICE candidate: %s", e)
 
     async def setup_peer_connection(self):
-        """
-        Set up WebRTC peer connection
-        """
+        """Setup WebRTC peer connection"""
         logger.info("Setting up new peer connection")
         if self.pc:
             logger.warning("Peer connection already exists")
             return
 
-        # Create peer connection with ICE servers
+        # Create ICE gatherer first
+        self.ice_gatherer = RTCIceGatherer(iceServers=self.ice_servers)
+        logger.info("Created ICE gatherer")
+
+        # Start gathering candidates
+        await self.ice_gatherer.gather()
+        await asyncio.sleep(5)
+        
+        # Get local candidates and parameters
+        local_candidates = self.ice_gatherer.getLocalCandidates()
+        local_parameters = self.ice_gatherer.getLocalParameters()
+        
+        # Log all gathered candidates
+        for candidate in local_candidates:
+            candidate_str = str(candidate)
+            logger.info("Raw ICE candidate: %s", candidate_str)
+            
+            # Parse candidate string into proper format
+            # Example format: "candidate:1467250027 1 udp 2122260223 192.168.0.196 56143 typ host"
+            components = {}
+            for attr in candidate_str.split(','):
+                key, value = attr.split('=')
+                components[key.strip()] = value.strip("'")
+            
+            # Create properly formatted candidate string
+            formatted_candidate = f"candidate:{components.get('foundation', '0')} " \
+                                f"{components.get('component', '1')} " \
+                                f"{components.get('protocol', 'udp')} " \
+                                f"{components.get('priority', '0')} " \
+                                f"{components.get('ip', '')} " \
+                                f"{components.get('port', '0')} " \
+                                f"typ {components.get('type', 'host')}"
+
+            # Add related address if present
+            if components.get('relatedAddress'):
+                formatted_candidate += f" raddr {components['relatedAddress']} rport {components.get('relatedPort', '0')}"
+            
+            logger.info("Formatted ICE candidate: %s", formatted_candidate)
+            
+            # Log candidate type
+            if components.get('type') == 'srflx':
+                logger.info("STUN discovered public IP: %s", components.get('ip'))
+            elif components.get('type') == 'host':
+                logger.info("Local candidate: %s", components.get('ip'))
+            elif components.get('type') == 'relay':
+                logger.info("Relay candidate: %s", components.get('ip'))
+            
+            # Send properly formatted candidate to peer
+            candidate_dict = {
+                "candidate": formatted_candidate,
+                "sdpMid": "0",
+                "sdpMLineIndex": 0,
+            }
+            await self.sio.emit("ice", (candidate_dict, self.room))
+            logger.info("Sent ICE candidate to signaling server")
+
+        # Create peer connection with gathered candidates
         config = RTCConfiguration(
             iceServers=self.ice_servers,
-            # iceTransportPolicy="all",  # all or relay
-            # iceCandidatePoolSize=10,   # increase candidate pool size
         )
         self.pc = RTCPeerConnection(configuration=config)
         logger.info("Created new RTCPeerConnection")
-
-        @self.pc.on("icecandidate")
-        async def on_icecandidate(event):
-            logger.info("ICE candidate event triggered")
-            if event.candidate:
-                # logging all candidates
-                logger.info("ICE candidate: %s", event.candidate.candidate)
-
-                candidate_str = event.candidate.candidate
-
-                # check candidate type
-                if "typ srflx" in candidate_str:
-                    ip = parts[4]
-                    logger.info("STUN discovered public IP: %s", ip)
-                elif "typ host" in candidate_str:
-                    logger.info("Local candidate: %s", parts[4])
-                elif "typ relay" in candidate_str:
-                    logger.info("Relay candidate: %s", parts[4])
-                
-                parts = candidate_str.split()
-                ip = parts[4] if len(parts) > 4 else "unknown"
-                typ = parts[parts.index("typ") + 1] if "typ" in parts else "unknown"
-                logger.info(f"ICE candidate - IP: {ip}, Type: {typ}")
-                
-                # Send to room with correct event name 'ice'
-                await self.sio.emit("ice", ({
-                    "candidate": event.candidate.candidate,
-                    "sdpMid": event.candidate.sdpMid,
-                    "sdpMLineIndex": event.candidate.sdpMLineIndex,
-                }, self.room))
-                logger.info("Sent ICE candidate to signaling server")
-            else:
-                logger.info("ICE gathering completed")
-                await self.sio.emit("ice", (None, self.room))
 
         @self.pc.on("connectionstatechange")
         async def on_connectionstatechange():
@@ -192,19 +213,13 @@ class WebRTCSocketIOClient:
                 await self.pc.close()
                 self.pc = None
 
-        @self.pc.on("iceconnectionstatechange")
-        async def on_iceconnectionstatechange():
-            logger.info("ICE connection state is %s", self.pc.iceConnectionState)
-
         @self.pc.on("icegatheringstatechange")
         async def on_icegatheringstatechange():
             logger.info("ICE gathering state is %s", self.pc.iceGatheringState)
             if self.pc.iceGatheringState == "complete" and self.pc.localDescription:
-                # all candidates gathered
-                all_candidates = self.pc.localDescription.sdp
-                logger.info("All gathered candidates: %s", all_candidates)
+                logger.info("ICE gathering complete")
 
-        # Add video track first before creating offer/answer
+        # Add video track
         video_track = VideoStreamTrack(self.intermediate)
         self.pc.addTrack(video_track)
         logger.info("Added video track to peer connection")

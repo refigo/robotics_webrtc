@@ -244,19 +244,44 @@ socket.on("ice", (ice) => {
     
     if (ice) {
         const candidateStr = ice.candidate;
-        const parts = candidateStr.split(" ");
-        console.log("[ICE] Received candidate:", {
-            type: parts[7],          // host/srflx/relay
-            ip: parts[4],           // IP address
-            port: parts[5],         // Port number
-            protocol: parts[2],      // UDP/TCP
-            priority: parts[3]       // Priority
-        });
-        myPeerConnection.addIceCandidate(ice);
+        console.log("[ICE] Raw received candidate:", candidateStr);
+        
+        // Parse candidate components
+        const parts = candidateStr.split(' ');
+        if (parts.length >= 8) {  // Ensure we have minimum required parts
+            const candidateInfo = {
+                foundation: parts[0].split(':')[1],
+                component: parts[1],
+                protocol: parts[2],
+                priority: parts[3],
+                ip: parts[4],
+                port: parts[5],
+                type: parts[7]
+            };
+            
+            // Add raddr/rport if present (for srflx candidates)
+            if (parts.length > 9 && parts[8] === "raddr") {
+                candidateInfo.relatedAddress = parts[9];
+                candidateInfo.relatedPort = parts[11];
+            }
+            
+            console.log("[ICE] Parsed candidate:", candidateInfo);
+            
+            // Create proper RTCIceCandidate object
+            const candidate = new RTCIceCandidate({
+                candidate: candidateStr,
+                sdpMid: ice.sdpMid,
+                sdpMLineIndex: ice.sdpMLineIndex
+            });
+            
+            myPeerConnection.addIceCandidate(candidate)
+                .catch(err => console.error("[ICE] Error adding candidate:", err));
+        } else {
+            console.warn("[ICE] Invalid candidate format:", candidateStr);
+        }
     } else {
         console.log("[ICE] Remote gathering complete - null candidate");
     }
-    // console.log("received ICE candidate", ice);
 });
 
 socket.on('bye', (left) => {
@@ -291,11 +316,12 @@ function makeConnection() {
         iceServers: [
             {
                 urls: [
-                    "stun:stun.l.google.com:19302",
-                    "stun:stun1.l.google.com:19302",
-                    "stun:stun2.l.google.com:19302",
-                    "stun:stun3.l.google.com:19302",
-                    "stun:stun4.l.google.com:19302",
+                    "stun:3.34.132.103:3478",
+                    // "stun:stun.l.google.com:19302",
+                    // "stun:stun1.l.google.com:19302",
+                    // "stun:stun2.l.google.com:19302",
+                    // "stun:stun3.l.google.com:19302",
+                    // "stun:stun4.l.google.com:19302",
                 ],
             },
         ],
@@ -328,20 +354,43 @@ function makeConnection() {
 function handleIce(data) {
     if (data.candidate) {
         const candidateStr = data.candidate.candidate;
-        const parts = candidateStr.split(" ");
-        console.log("[ICE] Generated candidate:", {
-            type: parts[7],          // host/srflx/relay
-            ip: parts[4],           // IP address
-            port: parts[5],         // Port number
-            protocol: parts[2],      // UDP/TCP
-            priority: parts[3],      // Priority
-            foundation: parts[0].split(":")[1]  // Foundation
-        });
+        console.log("[ICE] Raw generated candidate:", candidateStr);
+        
+        // Parse candidate components
+        const parts = candidateStr.split(' ');
+        if (parts.length >= 8) {  // Ensure we have minimum required parts
+            const candidateInfo = {
+                foundation: parts[0].split(':')[1],
+                component: parts[1],
+                protocol: parts[2],
+                priority: parts[3],
+                ip: parts[4],
+                port: parts[5],
+                type: parts[7]
+            };
+            
+            // Add raddr/rport if present (for srflx candidates)
+            if (parts.length > 9 && parts[8] === "raddr") {
+                candidateInfo.relatedAddress = parts[9];
+                candidateInfo.relatedPort = parts[11];
+            }
+            
+            console.log("[ICE] Parsed candidate:", candidateInfo);
+            
+            // Create proper RTCIceCandidate object
+            const candidate = new RTCIceCandidate({
+                candidate: candidateStr,
+                sdpMid: data.candidate.sdpMid,
+                sdpMLineIndex: data.candidate.sdpMLineIndex
+            });
+            
+            socket.emit("ice", candidate, roomName);
+        } else {
+            console.warn("[ICE] Invalid candidate format:", candidateStr);
+        }
     } else {
         console.log("[ICE] Gathering complete - null candidate");
     }
-    socket.emit("ice", data.candidate, roomName);
-    console.log("sent ICE candidate", data.candidate);
 }
 
 function handleAddStream(data) {
