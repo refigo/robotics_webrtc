@@ -27,7 +27,7 @@ class WebRTCSocketIOClient:
     """
     Socket.IO client for WebRTC peer connections via signaling server
     """
-    def __init__(self, intermediate_node, room="room1", nickname="ROS2Client"):
+    def __init__(self, intermediate_node, room="room2", nickname="ROS2Client"):
         self.intermediate = intermediate_node
         self.room = room
         self.nickname = nickname
@@ -284,7 +284,7 @@ class WebRTCSocketIOClient:
         """
         Connect to the signaling server
         """
-        server_url = 'http://3.34.45.27:3000'
+        # server_url = 'http://3.34.45.27:3000'
         await self.sio.connect(server_url)
 
     async def disconnect(self):

@@ -13,7 +13,7 @@ let nickname = 'Anonymous';
 // let roomName;
 
 // Video
-const myFace = document.getElementById("myFace");
+// const myFace = document.getElementById("myFace");
 const muteBtn = document.getElementById("mute");
 const cameraBtn = document.getElementById("camera");
 const camerasSelect = document.getElementById("cameras");
@@ -27,6 +27,7 @@ let cameraOff = true;
 let roomName;
 let myPeerConnection;
 let myDataChannel;
+let pendingCandidates = [];  // Add this line to store pending candidates
 
 async function getCameras() {
     try {
@@ -82,7 +83,7 @@ async function getMedia(deviceId) {
         myStream.getVideoTracks().forEach(track => track.enabled = false);
     }
     
-    myFace.srcObject = myStream; 
+    // myFace.srcObject = myStream; 
 }
 
 function handleMuteClick() {
@@ -236,7 +237,7 @@ socket.on("answer", (answer) => {
     myPeerConnection.setRemoteDescription(answer);
 });
 
-socket.on("ice", (ice) => {
+socket.on("ice", async (ice) => {
     if (!myPeerConnection) {
         console.warn("[ICE] No peer connection to add candidate");
         return;
@@ -256,16 +257,20 @@ socket.on("ice", (ice) => {
                 priority: parts[3],
                 ip: parts[4],
                 port: parts[5],
-                type: parts[7]
+                type: parts[7],
+                sdpMid: ice.sdpMid,
+                sdpMLineIndex: ice.sdpMLineIndex
             };
             
             // Add raddr/rport if present (for srflx candidates)
             if (parts.length > 9 && parts[8] === "raddr") {
-                candidateInfo.relatedAddress = parts[9];
-                candidateInfo.relatedPort = parts[11];
+                candidateInfo.raddr = parts[9]; // relatedAddress
+                candidateInfo.rport = parts[11]; // relatedPort
             }
             
             console.log("[ICE] Parsed candidate:", candidateInfo);
+            // const testCandidateStr = JSON.stringify(candidateInfo);
+            // console.log(testCandidateStr)
             
             // Create proper RTCIceCandidate object
             const candidate = new RTCIceCandidate({
@@ -273,12 +278,22 @@ socket.on("ice", (ice) => {
                 sdpMid: ice.sdpMid,
                 sdpMLineIndex: ice.sdpMLineIndex
             });
-            
-            myPeerConnection.addIceCandidate(candidate)
-                .catch((err) => {
+            // const candidate = new RTCIceCandidate(candidateInfo)
+
+            // If remote description is not set, queue the candidate
+            if (!myPeerConnection.remoteDescription) {
+                console.log("[ICE] Queuing candidate until remote description is set");
+                pendingCandidates.push(candidate);
+            } else {
+                try {
+                    await myPeerConnection.addIceCandidate(candidate);
+                    console.log("[ICE] Successfully added candidate");
+                    console.log(candidate);
+                } catch (err) {
                     console.error("[ICE] Error adding candidate:", err);
-                    console.log("Error candidate: ", candidate);
-                });
+                    console.log("Error candidate:", candidate);
+                }
+            }
         } else {
             console.warn("[ICE] Invalid candidate format:", candidateStr);
         }
@@ -354,7 +369,7 @@ function makeConnection() {
     }
 }
 
-function handleIce(data) {
+async function handleIce(data) {
     if (data.candidate) {
         const candidateStr = data.candidate.candidate;
         console.log("[ICE] Raw generated candidate:", candidateStr);
@@ -393,6 +408,19 @@ function handleIce(data) {
         }
     } else {
         console.log("[ICE] Gathering complete - null candidate");
+    }
+
+    // Add any candidates that were queued
+    while (pendingCandidates.length > 0) {
+        const pendedCandidate = pendingCandidates.shift();
+        try {
+            await myPeerConnection.addIceCandidate(pendedCandidate);
+            console.log("[ICE] Successfully added queued candidate");
+            console.log(pendedCandidate)
+        } catch (err) {
+            console.error("[ICE] Error adding queued candidate:", err);
+            console.log(pendedCandidate)
+        }
     }
 }
 
@@ -464,7 +492,7 @@ function cleanupWebRTC() {
     }
 
     // Clear video elements
-    if (myFace) myFace.srcObject = null;
+    // if (myFace) myFace.srcObject = null;
     const peerFace = document.getElementById("peerFace");
     if (peerFace) peerFace.srcObject = null;
 }

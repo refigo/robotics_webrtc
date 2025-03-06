@@ -5,6 +5,7 @@ html(lang="en")
         meta(name="viewport", content="width=device-width, initial-scale=1.0")
         title Robotics WebRTC
         link(rel="stylesheet", href="https://unpkg.com/mvp.css")
+        //- link(rel="stylesheet", href="https://unpkg.com/@picocss/pico@1.*/css/pico.min.css")
     body
         header
             h1 Robotics WebRTC
@@ -25,8 +26,8 @@ html(lang="en")
                     h3 Video Call
                     div#myStream
                         div#videoContainer(style="display: flex; gap: 10px;")
-                            video#myFace(autoplay, playsinline, width="400", height="400")
-                            video#peerFace(autoplay, playsinline, width="400", height="400")
+                            video#peerFace(autoplay, playsinline, style="width: 100%;") // align middle
+                            //- video#myFace(autoplay, playsinline, width="400", height="400")
                         button#mute Unmute
                         button#camera Turn Camera On
                         select#cameras
