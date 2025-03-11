@@ -351,6 +351,13 @@ function makeConnection() {
                     // "stun:stun4.l.google.com:19302",
                 ],
             },
+            {
+                urls: [
+                    "turn:3.34.132.103:3478?transport=udp",
+                ],
+                username: "testref",
+                credential: "Ref32111!",
+            }
         ],
     });
     console.log("[RTC] Created peer connection with config:", myPeerConnection.getConfiguration());
