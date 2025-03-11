@@ -258,27 +258,36 @@ socket.on("ice", async (ice) => {
                 ip: parts[4],
                 port: parts[5],
                 type: parts[7],
-                sdpMid: ice.sdpMid,
-                sdpMLineIndex: ice.sdpMLineIndex
+                // sdpMid: ice.sdpMid,
+                // sdpMLineIndex: ice.sdpMLineIndex
             };
-            
+
             // Add raddr/rport if present (for srflx candidates)
             if (parts.length > 9 && parts[8] === "raddr") {
                 candidateInfo.raddr = parts[9]; // relatedAddress
                 candidateInfo.rport = parts[11]; // relatedPort
             }
             
-            console.log("[ICE] Parsed candidate:", candidateInfo);
-            // const testCandidateStr = JSON.stringify(candidateInfo);
-            // console.log(testCandidateStr)
             
-            // Create proper RTCIceCandidate object
+            // Clean candidate string by removing raddr/rport None values
+            let cleanCandidateStr = parts.slice(0, 8).join(' ');  // Keep up to "typ host/srflx"
+            
+            // Only add raddr/rport if they exist and are not None
+            if (parts.length > 9 && parts[8] === "raddr" && parts[9].toLowerCase() !== "none") {
+                cleanCandidateStr += ` raddr ${parts[9]}`;
+                if (parts.length > 11 && parts[10] === "rport" && parts[11].toLowerCase() !== "none") {
+                    cleanCandidateStr += ` rport ${parts[11]}`;
+                }
+            }
+            
+            console.log("[ICE] Cleaned candidate string:", cleanCandidateStr);
+            
+            // Create proper RTCIceCandidate object with cleaned string
             const candidate = new RTCIceCandidate({
-                candidate: candidateStr,
+                candidate: cleanCandidateStr,
                 sdpMid: ice.sdpMid,
                 sdpMLineIndex: ice.sdpMLineIndex
             });
-            // const candidate = new RTCIceCandidate(candidateInfo)
 
             // If remote description is not set, queue the candidate
             if (!myPeerConnection.remoteDescription) {
@@ -389,8 +398,8 @@ async function handleIce(data) {
             
             // Add raddr/rport if present (for srflx candidates)
             if (parts.length > 9 && parts[8] === "raddr") {
-                candidateInfo.relatedAddress = parts[9];
-                candidateInfo.relatedPort = parts[11];
+                candidateInfo.relatedAddress = parts[9]; // relatedAddress
+                candidateInfo.relatedPort = parts[11]; // relatedPort
             }
             
             console.log("[ICE] Parsed candidate:", candidateInfo);
