@@ -46,8 +46,8 @@ class Intermediate(Node):
         self.image_received = False
         
         self.rtt = None
-        # self.manual_resolution = (1920, 1080)
-        self.manual_resolution = (640, 480)  # Start with a more reasonable resolution
+        self.manual_resolution = (1280, 720)
+        # self.manual_resolution = (640, 480)  # Start with a more reasonable resolution
         self.mode = mode
         logger.info("Intermediate Node initialized in %s mode", self.mode)
 
