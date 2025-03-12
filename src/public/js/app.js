@@ -344,16 +344,13 @@ function makeConnection() {
             {
                 urls: [
                     "stun:3.34.132.103:3478",
-                    // "stun:stun.l.google.com:19302",
-                    // "stun:stun1.l.google.com:19302",
-                    // "stun:stun2.l.google.com:19302",
-                    // "stun:stun3.l.google.com:19302",
-                    // "stun:stun4.l.google.com:19302",
+                    "stun:stun2.l.google.com:19302",
                 ],
             },
             {
                 urls: [
                     "turn:3.34.132.103:3478?transport=udp",
+                    "turn:3.34.132.103:3478?transport=tcp",
                 ],
                 username: "testref",
                 credential: "Ref32111!",

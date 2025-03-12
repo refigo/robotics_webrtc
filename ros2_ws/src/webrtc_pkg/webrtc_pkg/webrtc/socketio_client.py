@@ -38,27 +38,13 @@ class WebRTCSocketIOClient:
         self.ice_servers = [
             RTCIceServer(urls=[
                 "stun:3.34.132.103:3478",
-                # "turn:3.34.132.103:3478?transport=udp",
-                # "turn:3.34.132.103:3478?transport=tcp",
-                # "turn:3.34.132.103:3478?transport=tls"
             ]),
             RTCIceServer(urls=[
                 "turn:3.34.132.103:3478?transport=udp",
-                # "turn:3.34.132.103:3478?transport=tcp",
-                # "turn:3.34.132.103:3478?transport=tls"
+                "turn:3.34.132.103:3478?transport=tcp",
+                "turn:3.34.132.103:3478?transport=tls",
             ], username="testref", credential="Ref32111!"),
-            # RTCIceServer(urls="stun:stun.l.google.com:19302"),
-            # RTCIceServer(urls="stun:stun1.l.google.com:19302"),
-            # RTCIceServer(urls="stun:stun2.l.google.com:19302"),
-            # RTCIceServer(urls="stun:stun3.l.google.com:19302"),
-            # RTCIceServer(urls="stun:stun4.l.google.com:19302"),
-            # RTCIceServer(urls=[
-            #     "stun:stun.l.google.com:19302",
-            #     "stun:stun1.l.google.com:19302",
-            #     "stun:stun2.l.google.com:19302",
-            #     "stun:stun3.l.google.com:19302",
-            #     "stun:stun4.l.google.com:19302",
-            # ]),
+            RTCIceServer(urls="stun:stun2.l.google.com:19302"),
         ]
         self.setup_handlers()
 
@@ -294,7 +280,7 @@ class WebRTCSocketIOClient:
         """
         Connect to the signaling server
         """
-        server_url = 'http://3.34.45.27:3000'
+        # server_url = 'http://3.34.45.27:3000'
         await self.sio.connect(server_url)
 
     async def disconnect(self):
